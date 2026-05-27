@@ -1,0 +1,102 @@
+services:
+  - type: web
+    name: finintel-ai-backend
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_ENV
+        value: "production"
+      - key: APP_RELEASE
+        value: "finintel-ai@0.1.0"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: APP_API_KEY
+        generateValue: true
+      - key: AUTH_TOKEN_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        value: "sqlite:///data/finintel.sqlite3"
+      - key: GROQ_FAST_MODEL
+        value: "llama-3.1-8b-instant"
+      - key: GROQ_COMPLEX_MODEL
+        value: "llama-3.3-70b-versatile"
+      - key: GROQ_MODEL
+        value: "llama-3.3-70b-versatile"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "30"
+      - key: CHAT_EXECUTION_TIMEOUT_SECONDS
+        value: "45"
+      - key: EXTERNAL_CALL_TIMEOUT_SECONDS
+        value: "20"
+      - key: RAG_ENABLED
+        value: "true"
+      - key: RAG_TOP_K
+        value: "3"
+      - key: RAG_MIN_SCORE
+        value: "0.08"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: STOCK_DATA_CACHE_SECONDS
+        value: "300"
+      - key: SEARCH_CACHE_SECONDS
+        value: "600"
+      - key: TICKER_CACHE_SECONDS
+        value: "3600"
+      - key: SYMBOL_MASTER_PATH
+        value: "data/market/indian_equities.csv"
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.05"
+      - key: CLERK_JWKS_URL
+        sync: false
+      - key: CLERK_ISSUER
+        sync: false
+      - key: CLERK_AUDIENCE
+        sync: false
+      - key: AUTH_ALLOW_REGISTRATION
+        value: "true"
+      - key: FRONTEND_ALLOWED_ORIGINS
+        sync: false
+
+  - type: web
+    name: finintel-ai-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: VITE_BACKEND_API_URL
+        sync: false
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: VITE_APP_ENV
+        value: "production"
+      - key: VITE_APP_RELEASE
+        value: "finintel-ai-frontend@0.1.0"
+      - key: VITE_SENTRY_DSN
+        sync: false
+      - key: VITE_SENTRY_TRACES_SAMPLE_RATE
+        value: "0.05"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff

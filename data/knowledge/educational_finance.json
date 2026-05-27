@@ -1,0 +1,66 @@
+[
+  {
+    "id": "roe",
+    "title": "Return on Equity (ROE)",
+    "summary": "ROE measures how efficiently a company generates profit from shareholder equity.",
+    "content": "Return on Equity is calculated as net income divided by average shareholder equity. A higher ROE can indicate efficient use of capital, but it should be interpreted with debt levels, industry norms, and accounting quality. High leverage can inflate ROE, so ROE should not be used alone.",
+    "keywords": ["roe", "return on equity", "profitability", "shareholder equity", "net income"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "roce",
+    "title": "Return on Capital Employed (ROCE)",
+    "summary": "ROCE measures operating profit generated from total capital employed.",
+    "content": "Return on Capital Employed compares operating profit with the capital used in the business. It is useful for capital-intensive sectors because it considers both equity and debt-funded capital. ROCE should be compared with peers and the company's cost of capital.",
+    "keywords": ["roce", "return on capital employed", "capital employed", "operating profit"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "pe-ratio",
+    "title": "Price to Earnings Ratio (P/E)",
+    "summary": "P/E compares a company's share price with its earnings per share.",
+    "content": "The price to earnings ratio is calculated as market price per share divided by earnings per share. A high P/E may reflect growth expectations or overvaluation, while a low P/E may indicate undervaluation or business risk. It should be interpreted with growth, margins, return ratios, and sector context.",
+    "keywords": ["pe", "p/e", "price earnings", "valuation", "eps", "earnings per share"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "debt-to-equity",
+    "title": "Debt to Equity Ratio",
+    "summary": "Debt to equity compares borrowings with shareholder equity.",
+    "content": "Debt to equity helps assess financial leverage. A high ratio can increase financial risk because interest and repayment obligations may pressure cash flows. The acceptable level varies by sector; banks and financial companies require different interpretation from manufacturing or technology companies.",
+    "keywords": ["debt to equity", "debt/equity", "leverage", "borrowings", "financial risk"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "free-cash-flow",
+    "title": "Free Cash Flow",
+    "summary": "Free cash flow is cash left after operating expenses and capital expenditure.",
+    "content": "Free cash flow indicates how much cash a business can generate after maintaining or expanding its asset base. Positive and consistent free cash flow can support dividends, debt reduction, acquisitions, and reinvestment. It should be checked alongside profit quality and working capital trends.",
+    "keywords": ["free cash flow", "fcf", "cash flow", "capital expenditure", "working capital"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "dividend-yield",
+    "title": "Dividend Yield",
+    "summary": "Dividend yield compares annual dividend with current market price.",
+    "content": "Dividend yield is calculated as annual dividend per share divided by current share price. A high yield may appeal to income-focused investors, but it can also signal weak price performance or an unsustainable payout. Dividend consistency and cash flow coverage matter.",
+    "keywords": ["dividend yield", "dividend", "income", "payout", "yield"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "operating-margin",
+    "title": "Operating Margin",
+    "summary": "Operating margin measures operating profit as a percentage of revenue.",
+    "content": "Operating margin shows how much profit a company earns from core operations before interest and tax. Higher margins may indicate pricing power, cost control, or scale advantages. Margins should be compared with industry peers and historical trends.",
+    "keywords": ["operating margin", "margin", "profitability", "operating profit", "revenue"],
+    "source": "FinIntel curated finance knowledge base"
+  },
+  {
+    "id": "market-capitalization",
+    "title": "Market Capitalization",
+    "summary": "Market capitalization is the total market value of a company's equity.",
+    "content": "Market capitalization is calculated as current share price multiplied by shares outstanding. It indicates company size in the market, but it is not the same as business quality or intrinsic value. Market cap should be considered with earnings, cash flows, debt, and growth.",
+    "keywords": ["market capitalization", "market cap", "company size", "shares outstanding"],
+    "source": "FinIntel curated finance knowledge base"
+  }
+]

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync --locked
+
+      - name: Compile backend
+        run: uv run python -m compileall backend
+
+      - name: Run backend tests
+        env:
+          GROQ_API_KEY: test-groq-key
+          TAVILY_API_KEY: test-tavily-key
+          APP_API_KEY: test-api-key
+          AUTH_TOKEN_SECRET: test-auth-secret
+          DATABASE_URL: sqlite:///tmp/finintel-ci.sqlite3
+          AUTH_DATABASE_PATH: /tmp/finintel-ci.sqlite3
+          AUDIT_DATABASE_PATH: /tmp/finintel-ci.sqlite3
+          FRONTEND_ALLOWED_ORIGINS: http://localhost:5173
+          SENTRY_DSN: ""
+        run: uv run python -m pytest
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        env:
+          VITE_BACKEND_API_URL: http://127.0.0.1:8000
+          VITE_CLERK_PUBLISHABLE_KEY: ""
+          VITE_APP_ENV: test
+          VITE_APP_RELEASE: finintel-ai-frontend@ci
+          VITE_SENTRY_DSN: ""
+          VITE_SENTRY_TRACES_SAMPLE_RATE: "0"
+        run: npm run build

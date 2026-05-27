@@ -1,0 +1,115 @@
+[
+  {
+    "route": "PRICE_QUERY",
+    "response": {
+      "success": true,
+      "data": {
+        "query_type": "PRICE_QUERY",
+        "company_name": "HDFC Bank",
+        "ticker": "HDFCBANK.NS",
+        "current_price": 1500.0,
+        "market_cap": "INR 11.50 Lakh Cr",
+        "pe_ratio": 18.5,
+        "sector": "Financial Services",
+        "currency": "INR",
+        "confidence_score": 0.9,
+        "message": "HDFC Bank is currently trading at INR 1500.0.",
+        "disclaimer": "This information is for educational purposes only and not investment advice."
+      },
+      "error": null
+    }
+  },
+  {
+    "route": "EDUCATIONAL",
+    "response": {
+      "success": true,
+      "data": {
+        "topic": "ROE",
+        "simple_definition": "Return on equity measures profitability relative to shareholder equity.",
+        "detailed_explanation": "ROE helps evaluate how efficiently a company uses shareholder capital.",
+        "why_it_matters": "It helps compare profitability across peers.",
+        "practical_interpretation": "Higher ROE can be positive, but it should be checked with debt levels.",
+        "limitations": "ROE can be distorted by leverage and accounting effects.",
+        "example": "A company earning INR 20 on INR 100 equity has 20% ROE.",
+        "confidence_score": 0.9,
+        "disclaimer": "This is educational content and not investment advice.",
+        "sources_used": ["FinIntel curated finance knowledge base"]
+      },
+      "error": null
+    }
+  },
+  {
+    "route": "DISCOVERY",
+    "response": {
+      "success": true,
+      "data": {
+        "query_type": "DISCOVERY",
+        "summary": "The Indian IT sector includes several large-cap companies with strong cash generation.",
+        "key_points": ["Focus on margins, deal wins, and valuation discipline."],
+        "mentioned_companies": ["TCS", "Infosys"],
+        "confidence_score": 0.82,
+        "sources_used": ["https://www.moneycontrol.com/example"]
+      },
+      "error": null
+    }
+  },
+  {
+    "route": "NEWS",
+    "response": {
+      "success": true,
+      "data": {
+        "company_name": "Infosys",
+        "ticker": "INFY.NS",
+        "headline_summary": "Infosys remains in focus after recent business updates.",
+        "key_events": ["Recent market coverage discussed demand and margins."],
+        "market_impact": "The update may affect near-term sentiment.",
+        "sentiment": "Neutral",
+        "risk_factors": ["Demand slowdown remains a risk."],
+        "confidence_score": 0.8,
+        "disclaimer": "This news analysis is for educational purposes only and not investment advice.",
+        "sources": ["https://www.reuters.com/example"]
+      },
+      "error": null
+    }
+  },
+  {
+    "route": "COMPARISON",
+    "response": {
+      "success": true,
+      "data": {
+        "comparison_type": "GENERAL",
+        "companies_compared": ["HDFC Bank", "ICICI Bank"],
+        "summary": "Both banks have strong franchises with different valuation and growth profiles.",
+        "comparative_analysis": ["HDFC Bank has scale, while ICICI Bank has shown strong execution."],
+        "strengths": {"HDFC Bank": ["Scale"], "ICICI Bank": ["Execution"]},
+        "risks": {"HDFC Bank": ["Integration risk"], "ICICI Bank": ["Credit cycle risk"]},
+        "winner_summary": "No definitive winner; suitability depends on investor priorities.",
+        "balanced_view": "Both require valuation, asset-quality, and growth checks.",
+        "confidence_score": 0.85,
+        "sources_used": ["https://www.moneycontrol.com/example"],
+        "disclaimer": "This comparison is for educational purposes only and not investment advice."
+      },
+      "error": null
+    }
+  },
+  {
+    "route": "FUNDAMENTAL",
+    "response": {
+      "success": true,
+      "data": {
+        "company_name": "TCS",
+        "ticker": "TCS.NS",
+        "analysis_type": "GENERAL",
+        "business_overview": "TCS is a large Indian IT services company.",
+        "financial_strengths": ["Strong cash generation", "Healthy profitability"],
+        "financial_risks": ["Demand slowdown", "Valuation premium"],
+        "valuation_commentary": "Valuation should be compared with growth and margins.",
+        "overall_view": "The company appears fundamentally strong but should be assessed with valuation discipline.",
+        "confidence_score": 0.84,
+        "sources_used": ["https://www.moneycontrol.com/example"],
+        "disclaimer": "This analysis is for educational purposes only and not investment advice."
+      },
+      "error": null
+    }
+  }
+]

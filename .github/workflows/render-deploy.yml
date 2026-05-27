@@ -1,0 +1,33 @@
+name: Manual Render Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: render-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Trigger Render Deploy
+    runs-on: ubuntu-latest
+    env:
+      RENDER_BACKEND_DEPLOY_HOOK_URL: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}
+      RENDER_FRONTEND_DEPLOY_HOOK_URL: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}
+
+    steps:
+      - name: Trigger backend deploy hook
+        if: ${{ env.RENDER_BACKEND_DEPLOY_HOOK_URL != '' }}
+        run: curl -fsS -X POST "$RENDER_BACKEND_DEPLOY_HOOK_URL"
+
+      - name: Trigger frontend deploy hook
+        if: ${{ env.RENDER_FRONTEND_DEPLOY_HOOK_URL != '' }}
+        run: curl -fsS -X POST "$RENDER_FRONTEND_DEPLOY_HOOK_URL"
+
+      - name: Explain missing Render hooks
+        if: ${{ env.RENDER_BACKEND_DEPLOY_HOOK_URL == '' || env.RENDER_FRONTEND_DEPLOY_HOOK_URL == '' }}
+        run: |
+          echo "Render deploy hooks are not fully configured."
+          echo "Add these repository secrets to enable deploy after CI:"
+          echo "- RENDER_BACKEND_DEPLOY_HOOK_URL"
+          echo "- RENDER_FRONTEND_DEPLOY_HOOK_URL"

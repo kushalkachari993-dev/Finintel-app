@@ -1,0 +1,170 @@
+[
+  {
+    "query": "What is ROE?",
+    "expected_route": "EDUCATIONAL",
+    "expected_intent": "EDUCATIONAL",
+    "expected_companies": []
+  },
+  {
+    "query": "Explain PE ratio",
+    "expected_route": "EDUCATIONAL",
+    "expected_intent": "EDUCATIONAL",
+    "expected_companies": []
+  },
+  {
+    "query": "What does debt to equity mean?",
+    "expected_route": "EDUCATIONAL",
+    "expected_intent": "EDUCATIONAL",
+    "expected_companies": []
+  },
+  {
+    "query": "Define free cash flow",
+    "expected_route": "EDUCATIONAL",
+    "expected_intent": "EDUCATIONAL",
+    "expected_companies": []
+  },
+  {
+    "query": "Current price of HDFC Bank",
+    "expected_route": "PRICE_QUERY",
+    "expected_intent": "PRICE_QUERY",
+    "expected_companies": ["HDFC Bank"]
+  },
+  {
+    "query": "What is the share price of TCS?",
+    "expected_route": "PRICE_QUERY",
+    "expected_intent": "PRICE_QUERY",
+    "expected_companies": ["TCS"]
+  },
+  {
+    "query": "How much is Infosys trading at today?",
+    "expected_route": "PRICE_QUERY",
+    "expected_intent": "PRICE_QUERY",
+    "expected_companies": ["Infosys"]
+  },
+  {
+    "query": "Latest stock price of Reliance",
+    "expected_route": "PRICE_QUERY",
+    "expected_intent": "PRICE_QUERY",
+    "expected_companies": ["Reliance Industries"]
+  },
+  {
+    "query": "Compare HDFC Bank vs ICICI Bank",
+    "expected_route": "COMPARISON",
+    "expected_intent": "COMPARISON",
+    "expected_companies": ["HDFC Bank", "ICICI Bank"]
+  },
+  {
+    "query": "TCS vs Infosys",
+    "expected_route": "COMPARISON",
+    "expected_intent": "COMPARISON",
+    "expected_companies": ["TCS", "Infosys"]
+  },
+  {
+    "query": "Compare Reliance and TCS",
+    "expected_route": "COMPARISON",
+    "expected_intent": "COMPARISON",
+    "expected_companies": ["TCS", "Reliance Industries"]
+  },
+  {
+    "query": "Which is better, SBI or HDFC Bank?",
+    "expected_route": "COMPARISON",
+    "expected_intent": "COMPARISON",
+    "expected_companies": ["State Bank of India", "HDFC Bank"]
+  },
+  {
+    "query": "Top undervalued IT stocks in India",
+    "expected_route": "DISCOVERY",
+    "expected_intent": "DISCOVERY",
+    "expected_companies": []
+  },
+  {
+    "query": "Best private banks for long term investment",
+    "expected_route": "DISCOVERY",
+    "expected_intent": "DISCOVERY",
+    "expected_companies": []
+  },
+  {
+    "query": "Fundamentally strong pharma stocks",
+    "expected_route": "DISCOVERY",
+    "expected_intent": "DISCOVERY",
+    "expected_companies": []
+  },
+  {
+    "query": "Best quality stocks with high ROE",
+    "expected_route": "DISCOVERY",
+    "expected_intent": "DISCOVERY",
+    "expected_companies": []
+  },
+  {
+    "query": "Latest news about Infosys",
+    "expected_route": "NEWS",
+    "expected_intent": "NEWS",
+    "expected_companies": ["Infosys"]
+  },
+  {
+    "query": "Recent updates on Reliance Industries",
+    "expected_route": "NEWS",
+    "expected_intent": "NEWS",
+    "expected_companies": ["Reliance Industries"]
+  },
+  {
+    "query": "What happened with HDFC Bank today?",
+    "expected_route": "NEWS",
+    "expected_intent": "NEWS",
+    "expected_companies": ["HDFC Bank"]
+  },
+  {
+    "query": "Latest RBI news affecting banks",
+    "expected_route": "NEWS",
+    "expected_intent": "NEWS",
+    "expected_companies": []
+  },
+  {
+    "query": "Fundamental analysis of TCS",
+    "expected_route": "FUNDAMENTAL",
+    "expected_intent": "FUNDAMENTAL",
+    "expected_companies": ["TCS"]
+  },
+  {
+    "query": "Analyze HDFC Bank financials",
+    "expected_route": "FUNDAMENTAL",
+    "expected_intent": "FUNDAMENTAL",
+    "expected_companies": ["HDFC Bank"]
+  },
+  {
+    "query": "Is Infosys fundamentally strong?",
+    "expected_route": "FUNDAMENTAL",
+    "expected_intent": "FUNDAMENTAL",
+    "expected_companies": ["Infosys"]
+  },
+  {
+    "query": "Reliance valuation analysis",
+    "expected_route": "FUNDAMENTAL",
+    "expected_intent": "FUNDAMENTAL",
+    "expected_companies": ["Reliance Industries"]
+  },
+  {
+    "query": "What is ROE of HDFC Bank?",
+    "expected_route": "EDUCATIONAL",
+    "expected_intent": "EDUCATIONAL",
+    "expected_companies": ["HDFC Bank"]
+  },
+  {
+    "query": "Tell me about HDFC Bank and ICICI Bank",
+    "expected_route": "FUNDAMENTAL",
+    "expected_intent": "FUNDAMENTAL",
+    "expected_companies": ["HDFC Bank", "ICICI Bank"]
+  },
+  {
+    "query": "Is TCS better than Infosys?",
+    "expected_route": "COMPARISON",
+    "expected_intent": "COMPARISON",
+    "expected_companies": ["TCS", "Infosys"]
+  },
+  {
+    "query": "What is the latest price and news for Reliance?",
+    "expected_route": "PRICE_QUERY",
+    "expected_intent": "PRICE_QUERY",
+    "expected_companies": ["Reliance Industries"]
+  }
+]
