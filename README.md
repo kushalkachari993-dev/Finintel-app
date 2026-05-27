@@ -51,6 +51,8 @@ GitHub Actions workflows live in `.github/workflows`:
 
 - `ci.yml` runs backend compile/tests and frontend production build.
 - `render-deploy.yml` can manually trigger Render deploy hooks.
+- `uptime-monitor.yml` checks the deployed frontend and backend health
+  every 15 minutes.
 
 See `docs/ci-cd.md` for setup details.
 

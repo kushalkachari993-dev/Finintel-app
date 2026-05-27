@@ -56,3 +56,31 @@ You can find each hook in Render:
 
 The manual deploy workflow is optional because the Blueprint already uses
 Render's after-CI deploy behavior.
+
+## Uptime Monitor
+
+Workflow: `.github/workflows/uptime-monitor.yml`
+
+This runs every 15 minutes and can also be started manually from GitHub
+Actions. It checks:
+
+- Frontend page loads successfully
+- Backend `/health` returns `{"status":"ok"}`
+
+Defaults:
+
+```text
+FRONTEND_URL=https://finintel-ai-frontend.onrender.com
+BACKEND_URL=https://finintel-ai-backend.onrender.com
+```
+
+If Render gives your backend a different URL, add GitHub repository
+variables:
+
+```text
+FRONTEND_URL=https://your-frontend.onrender.com
+BACKEND_URL=https://your-backend.onrender.com
+```
+
+GitHub will mark the workflow failed if either service is down. Enable
+GitHub Actions email notifications to receive uptime alerts.

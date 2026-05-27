@@ -1,0 +1,41 @@
+name: Uptime Monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: true
+
+jobs:
+  uptime:
+    name: Check Render Services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://finintel-ai-frontend.onrender.com' }}
+      BACKEND_URL: ${{ vars.BACKEND_URL || 'https://finintel-ai-backend.onrender.com' }}
+
+    steps:
+      - name: Check frontend
+        run: |
+          echo "Checking frontend: $FRONTEND_URL"
+          curl --fail --show-error --silent --location \
+            --max-time 30 \
+            --retry 2 \
+            --retry-delay 10 \
+            "$FRONTEND_URL" > /tmp/frontend.html
+          grep -qi "<html" /tmp/frontend.html
+
+      - name: Check backend health
+        run: |
+          echo "Checking backend: $BACKEND_URL/health"
+          curl --fail --show-error --silent --location \
+            --max-time 30 \
+            --retry 2 \
+            --retry-delay 10 \
+            "$BACKEND_URL/health" > /tmp/backend-health.json
+          grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/backend-health.json
