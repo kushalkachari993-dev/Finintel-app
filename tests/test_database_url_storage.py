@@ -3,6 +3,8 @@ from pathlib import Path
 
 from backend.audit import ChatAuditStore
 from backend.security.user_auth import UserStore
+from backend.storage import database_backend
+from backend.storage import normalize_database_url
 from backend.storage import resolve_sqlite_path
 
 
@@ -26,6 +28,18 @@ def test_rejects_unsupported_database_url():
         resolve_sqlite_path(
             "postgresql://user:pass@example.com/db"
         )
+
+
+def test_detects_and_normalizes_postgres_database_url():
+
+    assert database_backend(
+        "postgres://user:pass@example.com/db"
+    ) == "postgres"
+    assert normalize_database_url(
+        "postgres://user:pass@example.com/db"
+    ).startswith(
+        "postgresql://"
+    )
 
 
 def test_user_and_audit_stores_can_share_database_url(tmp_path):

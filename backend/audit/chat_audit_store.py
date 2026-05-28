@@ -1,11 +1,9 @@
 import json
-import sqlite3
 import time
-from pathlib import Path
 from uuid import uuid4
 
 from backend.config import settings
-from backend.storage import resolve_sqlite_path
+from backend.storage import connect_database
 
 
 class ChatAuditStore:
@@ -17,22 +15,20 @@ class ChatAuditStore:
     ):
         if database_path:
             self.database_path = database_path
+            self.database_url = None
         elif database_url:
-            self.database_path = resolve_sqlite_path(
-                database_url
-            )
+            self.database_path = None
+            self.database_url = database_url
         else:
             self.database_path = settings.AUDIT_DATABASE_PATH
+            self.database_url = settings.AUDIT_DATABASE_URL
 
-        Path(self.database_path).parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
         self.init_db()
 
     def connect(self):
-        return sqlite3.connect(
-            self.database_path
+        return connect_database(
+            database_url=self.database_url,
+            database_path=self.database_path
         )
 
     def init_db(self):

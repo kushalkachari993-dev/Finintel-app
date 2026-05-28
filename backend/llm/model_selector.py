@@ -4,7 +4,8 @@ from backend.config import settings
 COMPLEX_ROUTES = {
     "COMPARISON",
     "NEWS",
-    "DISCOVERY"
+    "DISCOVERY",
+    "REPORT"
 }
 
 

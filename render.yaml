@@ -1,3 +1,10 @@
+databases:
+  - name: finintel-ai-postgres
+    plan: free
+    region: singapore
+    databaseName: finintel_ai
+    user: finintel_ai
+
 services:
   - type: web
     name: finintel-ai-backend
@@ -24,7 +31,9 @@ services:
       - key: AUTH_TOKEN_SECRET
         generateValue: true
       - key: DATABASE_URL
-        value: "sqlite:///data/finintel.sqlite3"
+        fromDatabase:
+          name: finintel-ai-postgres
+          property: connectionString
       - key: GROQ_FAST_MODEL
         value: "llama-3.1-8b-instant"
       - key: GROQ_COMPLEX_MODEL

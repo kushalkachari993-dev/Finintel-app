@@ -17,6 +17,10 @@ from backend.utils.json_parser import (
 from backend.schemas.educational_schema import (
     EducationalResponse
 )
+from backend.agents.detail_guidance import (
+    answer_detail_guidance,
+    answer_detail_tokens
+)
 from backend.utils.provider_errors import (
     safe_provider_error
 )
@@ -43,7 +47,8 @@ class EducationalAgent:
     def explain(
         self,
         query: str,
-        model: str | None = None
+        model: str | None = None,
+        answer_detail: str = "brief"
     ):
 
         rag_results = []
@@ -93,6 +98,9 @@ IMPORTANT RULES:
 Return ONLY valid JSON.
 Do NOT return markdown.
 """
+        detail_guidance = answer_detail_guidance(
+            answer_detail
+        )
 
         # ---------------------------------------------------
         # USER PROMPT
@@ -106,6 +114,9 @@ QUERY:
 
 RAG CONTEXT:
 {rag_context if rag_context else "No relevant RAG context retrieved."}
+
+ANSWER DETAIL:
+{detail_guidance}
 
 Return ONLY valid JSON
 using this schema:
@@ -164,7 +175,11 @@ using this schema:
 
                     temperature=0.2,
 
-                    max_tokens=1200
+                    max_tokens=answer_detail_tokens(
+                        answer_detail,
+                        brief_tokens=1200,
+                        detailed_tokens=1900
+                    )
                 )
             )
 

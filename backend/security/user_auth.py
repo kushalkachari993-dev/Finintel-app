@@ -3,13 +3,11 @@ import hashlib
 import hmac
 import json
 import secrets
-import sqlite3
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from backend.config import settings
-from backend.storage import resolve_sqlite_path
+from backend.storage import connect_database
 
 
 PASSWORD_ITERATIONS = 210_000
@@ -34,22 +32,20 @@ class UserStore:
     ):
         if database_path:
             self.database_path = database_path
+            self.database_url = None
         elif database_url:
-            self.database_path = resolve_sqlite_path(
-                database_url
-            )
+            self.database_path = None
+            self.database_url = database_url
         else:
             self.database_path = settings.AUTH_DATABASE_PATH
+            self.database_url = settings.AUTH_DATABASE_URL
 
-        Path(self.database_path).parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
         self.init_db()
 
     def connect(self):
-        return sqlite3.connect(
-            self.database_path
+        return connect_database(
+            database_url=self.database_url,
+            database_path=self.database_path
         )
 
     def init_db(self):

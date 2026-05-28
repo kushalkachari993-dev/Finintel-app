@@ -67,7 +67,8 @@ class PriceAgent:
 
     def get_price(
         self,
-        query: str
+        query: str,
+        answer_detail: str = "brief"
     ):
 
         # ---------------------------------------------------
@@ -191,12 +192,28 @@ class PriceAgent:
 
         if current_price:
 
-            message = (
+            if answer_detail == "detailed":
 
-                f"{resolved_company_name} "
-                f"is currently trading at "
-                f"INR {current_price}."
-            )
+                message = (
+                    f"{resolved_company_name} is currently trading at "
+                    f"INR {current_price}. "
+                    f"The resolved ticker is {ticker}. "
+                    f"Available context shows market cap as "
+                    f"{market_cap or 'not available'}, P/E as "
+                    f"{pe_ratio if pe_ratio is not None else 'not available'}, "
+                    f"and sector as {sector or 'not available'}. "
+                    "Use this as a live price check only; verify during market "
+                    "hours because prices and valuation metrics can move."
+                )
+
+            else:
+
+                message = (
+
+                    f"{resolved_company_name} "
+                    f"is currently trading at "
+                    f"INR {current_price}."
+                )
 
         else:
 

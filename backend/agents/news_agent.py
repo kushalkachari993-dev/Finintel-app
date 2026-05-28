@@ -29,6 +29,10 @@ from backend.tools.financial_normalizer import (
 from backend.config.settings import (
     USD_TO_INR_RATE
 )
+from backend.agents.detail_guidance import (
+    answer_detail_guidance,
+    answer_detail_tokens
+)
 from backend.utils.provider_errors import (
     is_provider_error_text,
     safe_provider_error
@@ -253,7 +257,8 @@ class NewsAgent:
         self,
         query: str,
         intelligence: dict = None,
-        model: str | None = None
+        model: str | None = None,
+        answer_detail: str = "brief"
     ):
 
         # ---------------------------------------------------
@@ -298,6 +303,9 @@ class NewsAgent:
                 "analysis_focus",
                 []
             )
+        )
+        detail_guidance = answer_detail_guidance(
+            answer_detail
         )
 
         # ---------------------------------------------------
@@ -506,6 +514,9 @@ ANALYSIS FOCUS:
 NEWS:
 {news_context}
 
+ANSWER DETAIL:
+{detail_guidance}
+
 IMPORTANT RULES:
 
 - Use ONLY provided news
@@ -563,7 +574,11 @@ FORMAT:
 
                     temperature=0.2,
 
-                    max_tokens=1400,
+                    max_tokens=answer_detail_tokens(
+                        answer_detail,
+                        brief_tokens=1400,
+                        detailed_tokens=2200
+                    ),
 
                     model=model
                 )

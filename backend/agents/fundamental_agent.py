@@ -34,6 +34,10 @@ from backend.schemas.fundamental_schema import (
 from backend.utils.confidence_engine import (
     ConfidenceEngine
 )
+from backend.agents.detail_guidance import (
+    answer_detail_guidance,
+    answer_detail_tokens
+)
 from backend.utils.provider_errors import (
     safe_provider_error
 )
@@ -79,7 +83,8 @@ class FundamentalAgent:
         self,
         query: str,
         intelligence: dict = None,
-        model: str | None = None
+        model: str | None = None,
+        answer_detail: str = "brief"
     ):
 
         intelligence = (
@@ -226,6 +231,9 @@ class FundamentalAgent:
             if analysis_focus
             else "GENERAL"
         )
+        detail_guidance = answer_detail_guidance(
+            answer_detail
+        )
 
         # ---------------------------------------------------
         # PROMPTS
@@ -292,6 +300,9 @@ PRE-COMPUTED INTERPRETATIONS:
 
 TRUSTED COMPANY CONTEXT:
 {company_context if company_context else "No trusted company context retrieved."}
+
+ANSWER DETAIL:
+{detail_guidance}
 
 IMPORTANT INSTRUCTIONS:
 
@@ -372,7 +383,11 @@ using this schema:
 
                     temperature=0.2,
 
-                    max_tokens=1400,
+                    max_tokens=answer_detail_tokens(
+                        answer_detail,
+                        brief_tokens=1400,
+                        detailed_tokens=2300
+                    ),
                 )
             )
 

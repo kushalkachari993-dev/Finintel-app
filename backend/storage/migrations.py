@@ -2,6 +2,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.storage.connection import connect_database
+
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
@@ -44,19 +46,18 @@ def list_migrations(
 class MigrationRunner:
     def __init__(
         self,
-        database_path: str,
+        database_path: str | None = None,
+        database_url: str | None = None,
         migrations_dir: Path = MIGRATIONS_DIR
     ):
         self.database_path = database_path
+        self.database_url = database_url
         self.migrations_dir = migrations_dir
 
     def connect(self):
-        Path(self.database_path).parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
-        return sqlite3.connect(
-            self.database_path
+        return connect_database(
+            database_url=self.database_url,
+            database_path=self.database_path
         )
 
     @staticmethod
@@ -101,8 +102,12 @@ class MigrationRunner:
                 connection.execute(
                     statement
                 )
-            except sqlite3.OperationalError as error:
-                if "duplicate column name" in str(error).lower():
+            except Exception as error:
+                error_text = str(error).lower()
+                if (
+                    "duplicate column name" in error_text
+                    or "already exists" in error_text
+                ):
                     continue
 
                 raise

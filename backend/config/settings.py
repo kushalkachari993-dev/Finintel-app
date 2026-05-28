@@ -3,6 +3,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from backend.storage import is_sqlite_url
 from backend.storage import resolve_sqlite_path
 from backend.storage import MigrationRunner
 
@@ -90,7 +91,23 @@ DATABASE_URL = os.getenv(
 )
 
 
-DEFAULT_SQLITE_DATABASE_PATH = resolve_sqlite_path(
+DEFAULT_SQLITE_DATABASE_PATH = (
+    resolve_sqlite_path(
+        DATABASE_URL
+    )
+    if is_sqlite_url(
+        DATABASE_URL
+    )
+    else None
+)
+
+AUTH_DATABASE_URL = os.getenv(
+    "AUTH_DATABASE_URL",
+    DATABASE_URL
+)
+
+AUDIT_DATABASE_URL = os.getenv(
+    "AUDIT_DATABASE_URL",
     DATABASE_URL
 )
 
@@ -266,28 +283,27 @@ def validate_required_settings():
             "APP_API_KEY, API_CLIENTS_JSON, or AUTH_TOKEN_SECRET"
         )
 
-    auth_parent = Path(
-        AUTH_DATABASE_PATH
-    ).parent
-    auth_parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    audit_parent = Path(
-        AUDIT_DATABASE_PATH
-    ).parent
-    audit_parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    for database_path in {
-        AUTH_DATABASE_PATH,
-        AUDIT_DATABASE_PATH
+    for database_url, database_path in {
+        (
+            AUTH_DATABASE_URL,
+            AUTH_DATABASE_PATH
+        ),
+        (
+            AUDIT_DATABASE_URL,
+            AUDIT_DATABASE_PATH
+        )
     }:
+        if database_path:
+            Path(
+                database_path
+            ).parent.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
         MigrationRunner(
-            database_path
+            database_url=database_url,
+            database_path=database_path
         ).apply_pending()
 
     if missing:

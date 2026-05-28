@@ -24,6 +24,10 @@ from backend.utils.retrieval_filter import (
 from backend.utils.confidence_engine import (
     ConfidenceEngine
 )
+from backend.agents.detail_guidance import (
+    answer_detail_guidance,
+    answer_detail_tokens
+)
 from backend.utils.provider_errors import (
     is_provider_error_text,
     safe_provider_error
@@ -307,7 +311,8 @@ class DiscoveryAgent:
         self,
         query: str,
         intelligence: dict = None,
-        model: str | None = None
+        model: str | None = None,
+        answer_detail: str = "brief"
     ):
 
         # ---------------------------------------------------
@@ -352,6 +357,9 @@ class DiscoveryAgent:
                 "analysis_focus",
                 []
             )
+        )
+        detail_guidance = answer_detail_guidance(
+            answer_detail
         )
 
         # ---------------------------------------------------
@@ -544,6 +552,9 @@ ENHANCED SEARCH QUERY:
 WEB CONTEXT:
 {context_text}
 
+ANSWER DETAIL:
+{detail_guidance}
+
 IMPORTANT INSTRUCTIONS:
 
 - Align recommendations with investment style
@@ -589,7 +600,11 @@ FORMAT:
 
                     temperature=0.2,
 
-                    max_tokens=1400,
+                    max_tokens=answer_detail_tokens(
+                        answer_detail,
+                        brief_tokens=1400,
+                        detailed_tokens=2200
+                    ),
 
                     model=model
                 )

@@ -13,6 +13,13 @@ const EXAMPLES = [
   "Fundamental analysis of TCS",
 ];
 
+const REPORT_EXAMPLES = [
+  "Generate a fundamental report on TCS",
+  "Compare HDFC Bank and ICICI Bank as an investment report",
+  "Create a report on undervalued IT stocks in India",
+  "Prepare a news impact report for Infosys",
+];
+
 const ROUTE_LABELS: Record<string, string> = {
   PRICE_QUERY: "Price Check",
   EDUCATIONAL: "Learning",
@@ -20,6 +27,7 @@ const ROUTE_LABELS: Record<string, string> = {
   NEWS: "News",
   COMPARISON: "Comparison",
   FUNDAMENTAL: "Fundamentals",
+  REPORT: "Analyst Report",
 };
 
 type Route =
@@ -29,6 +37,7 @@ type Route =
   | "NEWS"
   | "COMPARISON"
   | "FUNDAMENTAL"
+  | "REPORT"
   | string;
 
 type ApiResult = {
@@ -52,6 +61,8 @@ type ApiResult = {
 };
 
 type AnswerDetail = "brief" | "detailed";
+
+type WorkMode = "chat" | "report";
 
 type AuthUser = {
   user_id: number;
@@ -110,11 +121,13 @@ type ChatMessage =
       id: string;
       role: "user";
       content: string;
+      mode?: WorkMode;
     }
   | {
       id: string;
       role: "assistant";
       result: ApiResult;
+      mode?: WorkMode;
     }
   | {
       id: string;
@@ -181,6 +194,101 @@ function formatPrice(value: unknown, currency = "INR") {
     currency,
     maximumFractionDigits: 2,
   }).format(numeric);
+}
+
+function sourceDomain(source: string) {
+  try {
+    return new URL(source).hostname.replace(/^www\./, "");
+  } catch {
+    return source.replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+  }
+}
+
+function sourceLabel(source: string) {
+  try {
+    const url = new URL(source);
+    const path = url.pathname
+      .split("/")
+      .filter(Boolean)
+      .slice(-2)
+      .join(" / ");
+
+    return path || url.hostname.replace(/^www\./, "");
+  } catch {
+    return source.replace(/^https?:\/\/(www\.)?/, "");
+  }
+}
+
+function sourceCountText(sources: unknown) {
+  const count = asList(sources).length;
+
+  if (!count) {
+    return "No external source links were attached to this response.";
+  }
+
+  return `${count} source link${count === 1 ? "" : "s"} attached to this report.`;
+}
+
+function firstText(
+  payload: Record<string, unknown>,
+  keys: string[]
+) {
+  for (const key of keys) {
+    const value = payload[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function flattenedList(
+  value: unknown
+): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item): string[] => {
+      if (typeof item === "string") return [item];
+      if (item && typeof item === "object") {
+        return Object.values(item).flatMap(flattenedList);
+      }
+
+      return [];
+    });
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(flattenedList);
+  }
+
+  return typeof value === "string" && value.trim()
+    ? [value]
+    : [];
+}
+
+function reportMetrics(
+  payload: Record<string, unknown>
+) {
+  const metricKeys: Record<string, string> = {
+    current_price: "Current Price",
+    pe_ratio: "P/E",
+    market_cap: "Market Cap",
+    sector: "Sector",
+    sentiment: "Sentiment",
+    recommendation: "Recommendation",
+    confidence_score: "Confidence",
+  };
+
+  return Object.entries(metricKeys)
+    .filter(([key]) => payload[key] !== null && payload[key] !== undefined && payload[key] !== "")
+    .map(([key, label]) => ({
+      label,
+      value: key === "current_price"
+        ? formatPrice(payload[key], asString(payload.currency, "INR"))
+        : payload[key],
+    }))
+    .slice(0, 6);
 }
 
 function newMessageId(role: ChatMessage["role"]) {
@@ -299,6 +407,7 @@ function confidenceLabel(score: number) {
 }
 
 function getPayloadTitle(route: Route, payload: Record<string, unknown>) {
+  if (route === "REPORT") return asString(payload.report_title) || "Analyst Report";
   if (route === "DISCOVERY") return "Discovery Ideas";
   if (route === "PRICE_QUERY") return asString(payload.company_name) || "Price Check";
   if (route === "EDUCATIONAL") return asString(payload.topic) || "Learning";
@@ -312,6 +421,7 @@ function getPayloadTitle(route: Route, payload: Record<string, unknown>) {
 }
 
 function getRouteSummary(route: Route, payload: Record<string, unknown>) {
+  if (route === "REPORT") return payload.executive_summary;
   if (route === "PRICE_QUERY") return payload.message;
   if (route === "EDUCATIONAL") return payload.simple_definition;
   if (route === "DISCOVERY") return payload.summary;
@@ -325,7 +435,8 @@ async function fetchAnalysis(
   token: string,
   answerDetail: AnswerDetail,
   conversationContext: ChatMessage[],
-  conversationId: string
+  conversationId: string,
+  mode: WorkMode
 ): Promise<ApiResult> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -337,7 +448,9 @@ async function fetchAnalysis(
     headers["X-API-Key"] = APP_API_KEY;
   }
 
-  const response = await fetch(`${BACKEND_API_URL}/chat`, {
+  const endpoint = mode === "report" ? "report" : "chat";
+
+  const response = await fetch(`${BACKEND_API_URL}/${endpoint}`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -375,6 +488,7 @@ async function fetchAnalysisStream(
   answerDetail: AnswerDetail,
   conversationContext: ChatMessage[],
   conversationId: string,
+  mode: WorkMode,
   onProgress: (progress: ProgressEvent) => void
 ): Promise<ApiResult> {
   const headers: Record<string, string> = {
@@ -387,7 +501,9 @@ async function fetchAnalysisStream(
     headers["X-API-Key"] = APP_API_KEY;
   }
 
-  const response = await fetch(`${BACKEND_API_URL}/chat/stream`, {
+  const endpoint = mode === "report" ? "report/stream" : "chat/stream";
+
+  const response = await fetch(`${BACKEND_API_URL}/${endpoint}`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -412,7 +528,8 @@ async function fetchAnalysisStream(
       token,
       answerDetail,
       conversationContext,
-      conversationId
+      conversationId,
+      mode
     );
   }
 
@@ -616,17 +733,31 @@ function ListPanel({
   );
 }
 
-function Sources({ sources }: { sources: unknown }) {
+function Sources({
+  sources,
+  compact = false,
+}: {
+  sources: unknown;
+  compact?: boolean;
+}) {
   const list = asList(sources);
   if (!list.length) return null;
 
   return (
-    <section className="section">
-      <h3>Sources</h3>
+    <section className={`section source-section ${compact ? "source-section-compact" : ""}`}>
+      <div className="section-heading-row">
+        <h3>{compact ? "Verified sources" : "Sources"}</h3>
+        <span>{list.length} link{list.length === 1 ? "" : "s"}</span>
+      </div>
       <div className="source-grid">
-        {list.map((source) => (
+        {list.map((source, index) => (
           <a href={source} target="_blank" rel="noreferrer" key={source}>
-            {source.replace(/^https?:\/\/(www\.)?/, "")}
+            <span className="source-index">{index + 1}</span>
+            <span>
+              <strong>{sourceDomain(source)}</strong>
+              <small>{sourceLabel(source)}</small>
+            </span>
+            <em>Open</em>
           </a>
         ))}
       </div>
@@ -651,6 +782,159 @@ function ConfidenceBreakdown({ breakdown }: { breakdown: unknown }) {
             <strong>{asString(value)}</strong>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function GuardrailNotice({ guardrails }: { guardrails: unknown }) {
+  const payload = asRecord(guardrails);
+  const warnings = asList(payload.warnings);
+  const sourceQuality = asRecord(payload.source_quality);
+  const dataQuality = asRecord(payload.data_quality);
+
+  if (!payload.applied && !warnings.length) return null;
+
+  return (
+    <section className="guardrail-notice">
+      <div>
+        <strong>Financial safety checks</strong>
+        <span>
+          Sources: {asString(sourceQuality.label, "Not available")}
+          {sourceQuality.source_count !== undefined
+            ? ` (${sourceQuality.source_count})`
+            : ""}
+          {" | "}
+          Data quality: {asString(dataQuality.label, "Not available")}
+        </span>
+      </div>
+      {warnings.length > 0 && (
+        <ul>
+          {warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function AnalystReportTemplate({
+  route,
+  payload,
+}: {
+  route: Route;
+  payload: Record<string, unknown>;
+}) {
+  const executiveSummary = asString(
+    getRouteSummary(route, payload),
+    firstText(payload, [
+      "summary",
+      "overall_view",
+      "business_overview",
+      "headline_summary",
+      "simple_definition",
+    ])
+  );
+  const researchView = firstText(payload, [
+    "winner_summary",
+    "market_impact",
+    "overall_view",
+    "valuation_commentary",
+    "practical_interpretation",
+    "balanced_view",
+  ]);
+  const risks = flattenedList(
+    payload.risk_factors
+    || payload.financial_risks
+    || payload.risks
+    || payload.limitations
+  );
+  const positives = flattenedList(
+    payload.financial_strengths
+    || payload.strengths
+    || payload.key_points
+    || payload.key_events
+  );
+  const metrics = reportMetrics(
+    payload
+  );
+
+  if (!executiveSummary && !researchView && !risks.length && !positives.length && !metrics.length) {
+    return null;
+  }
+
+  return (
+    <section className="analyst-template">
+      <div className="section-heading-row">
+        <h3>Analyst Report</h3>
+        <span>Structured detailed view</span>
+      </div>
+
+      <div className="analyst-grid">
+        {executiveSummary && (
+          <article className="analyst-card analyst-card-wide">
+            <span>01</span>
+            <h4>Executive Summary</h4>
+            <p>{executiveSummary}</p>
+          </article>
+        )}
+
+        {metrics.length > 0 && (
+          <article className="analyst-card">
+            <span>02</span>
+            <h4>Key Metrics & Evidence</h4>
+            <div className="analyst-metrics">
+              {metrics.map((metric) => (
+                <div key={metric.label}>
+                  <small>{metric.label}</small>
+                  <strong>{asString(metric.value)}</strong>
+                </div>
+              ))}
+            </div>
+          </article>
+        )}
+
+        {researchView && (
+          <article className="analyst-card">
+            <span>03</span>
+            <h4>Research View</h4>
+            <p>{researchView}</p>
+          </article>
+        )}
+
+        {positives.length > 0 && (
+          <article className="analyst-card">
+            <span>04</span>
+            <h4>Positive Drivers</h4>
+            <ul>
+              {positives.slice(0, 4).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </article>
+        )}
+
+        {risks.length > 0 && (
+          <article className="analyst-card">
+            <span>05</span>
+            <h4>Risks & Watchpoints</h4>
+            <ul>
+              {risks.slice(0, 4).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </article>
+        )}
+
+        <article className="analyst-card">
+          <span>06</span>
+          <h4>Next Checks</h4>
+          <p>
+            Validate latest filings, management commentary, sector trend,
+            valuation context, and source freshness before making any decision.
+          </p>
+        </article>
       </div>
     </section>
   );
@@ -682,6 +966,211 @@ function TrustStrip() {
   );
 }
 
+function modeLabel(mode?: WorkMode) {
+  return mode === "report" ? "Report" : "Chat";
+}
+
+function safeFileName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 80)
+    || "finintel-report";
+}
+
+async function exportElementToPdf(
+  element: HTMLElement,
+  title: string
+) {
+  const [
+    { default: html2canvas },
+    { default: jsPDF }
+  ] = await Promise.all([
+    import("html2canvas"),
+    import("jspdf")
+  ]);
+
+  const canvas = await html2canvas(
+    element,
+    {
+      backgroundColor: "#f6f8f7",
+      scale: 2,
+      useCORS: true
+    }
+  );
+  const image = canvas.toDataURL(
+    "image/png"
+  );
+  const pdf = new jsPDF(
+    "p",
+    "mm",
+    "a4"
+  );
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 10;
+  const imageWidth = pageWidth - margin * 2;
+  const imageHeight = (
+    canvas.height
+    * imageWidth
+  ) / canvas.width;
+  let remainingHeight = imageHeight;
+  let position = margin;
+
+  pdf.addImage(
+    image,
+    "PNG",
+    margin,
+    position,
+    imageWidth,
+    imageHeight
+  );
+  remainingHeight -= pageHeight - margin * 2;
+
+  while (remainingHeight > 0) {
+    position = remainingHeight - imageHeight + margin;
+    pdf.addPage();
+    pdf.addImage(
+      image,
+      "PNG",
+      margin,
+      position,
+      imageWidth,
+      imageHeight
+    );
+    remainingHeight -= pageHeight - margin * 2;
+  }
+
+  pdf.save(
+    `${safeFileName(title)}.pdf`
+  );
+}
+
+function ReportCompanyCard({ company }: { company: Record<string, unknown> }) {
+  const metrics = asRecord(company.key_metrics);
+
+  return (
+    <article className="report-company-card">
+      <div className="section-heading-row">
+        <div>
+          <h3>{asString(company.company_name, "Company")}</h3>
+          <span>{asString(company.ticker)}</span>
+        </div>
+      </div>
+
+      <Panel title="Business Snapshot">{company.business_snapshot}</Panel>
+      <div className="metric-grid">
+        <Metric label="Current Price" value={metrics.current_price} />
+        <Metric label="Market Cap" value={metrics.market_cap} />
+        <Metric label="P/E" value={metrics.pe_ratio} />
+        <Metric label="P/B" value={metrics.pb_ratio} />
+        <Metric label="ROE" value={metrics.roe} />
+        <Metric label="Profit Margin" value={metrics.profit_margin} />
+        <Metric label="Revenue Growth" value={metrics.revenue_growth} />
+        <Metric label="Debt/Equity" value={metrics.debt_to_equity} />
+      </div>
+      <Panel title="Financial Quality" tone="green">
+        {company.financial_quality}
+      </Panel>
+      <Panel title="Valuation View" tone="blue">
+        {company.valuation_view}
+      </Panel>
+      <ListPanel title="Growth Drivers" items={company.growth_drivers} tone="green" />
+      <ListPanel title="Risks" items={company.risks} tone="red" />
+      <Panel title="Analyst Takeaway">{company.analyst_takeaway}</Panel>
+      <Sources sources={company.sources} compact />
+    </article>
+  );
+}
+
+function ReportMetricStrip({ companies }: { companies: Record<string, unknown>[] }) {
+  const firstCompany = companies[0] || {};
+  const metrics = asRecord(firstCompany.key_metrics);
+
+  return (
+    <div className="report-metric-strip">
+      <Metric label="Company" value={firstCompany.company_name} />
+      <Metric label="Ticker" value={firstCompany.ticker} />
+      <Metric label="Market Cap" value={metrics.market_cap} />
+      <Metric label="P/E Ratio" value={metrics.pe_ratio} />
+    </div>
+  );
+}
+
+function uniqueItems(items: string[]) {
+  return Array.from(
+    new Set(
+      items
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function reportInsights(
+  payload: Record<string, unknown>,
+  companies: Record<string, unknown>[]
+) {
+  const directInsights = flattenedList(payload.key_insights);
+
+  if (directInsights.length) {
+    return uniqueItems(directInsights).slice(0, 7);
+  }
+
+  const companyInsights = companies.flatMap((company) => [
+    ...flattenedList(company.growth_drivers),
+    asString(company.analyst_takeaway),
+    asString(company.valuation_view),
+  ]);
+
+  return uniqueItems([
+    ...companyInsights,
+    ...flattenedList(payload.watchlist_triggers),
+    ...flattenedList(payload.next_checks),
+  ]).slice(0, 7);
+}
+
+function ReportInsightList({ insights }: { insights: string[] }) {
+  if (!insights.length) return null;
+
+  return (
+    <section className="report-section report-insights-card">
+      <div className="report-section-title">
+        <span>01</span>
+        <h3>Key Insights</h3>
+      </div>
+      <div className="report-insight-list">
+        {insights.map((insight) => (
+          <div className="report-insight-row" key={insight}>
+            <span />
+            <p>{insight}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportTextCard({
+  title,
+  copy,
+  tone = "neutral",
+}: {
+  title: string;
+  copy: unknown;
+  tone?: "neutral" | "green" | "amber" | "red";
+}) {
+  if (!copy) return null;
+
+  return (
+    <article className={`report-text-card report-text-card-${tone}`}>
+      <h3>{title}</h3>
+      <p>{asString(copy)}</p>
+    </article>
+  );
+}
+
 function ResultBody({
   route,
   payload,
@@ -692,6 +1181,103 @@ function ResultBody({
   answerDetail: AnswerDetail;
 }) {
   const detailed = answerDetail === "detailed";
+
+  if (route === "REPORT") {
+    const companies = asList(payload.companies)
+      .map((company) => asRecord(company))
+      .filter((company) => Object.keys(company).length > 0);
+    const firstCompany = companies[0] || {};
+    const insights = reportInsights(
+      payload,
+      companies
+    );
+
+    return (
+      <div className="report-page">
+        <ReportMetricStrip companies={companies} />
+
+        <section className="report-section report-overview">
+          <div className="report-section-title">
+            <span>00</span>
+            <h3>Stock Overview</h3>
+          </div>
+          <p>{asString(payload.stock_overview, asString(payload.executive_summary))}</p>
+        </section>
+
+        <ReportInsightList insights={insights} />
+
+        <div className="report-three-grid">
+          <ReportTextCard
+            title="Current Performance"
+            copy={
+              asString(payload.current_performance)
+              || asString(firstCompany.business_snapshot)
+              || asString(firstCompany.financial_quality)
+              || payload.sector_context
+            }
+            tone="green"
+          />
+          <ReportTextCard
+            title="Risk Assessment"
+            copy={
+              asString(payload.risk_assessment)
+              || flattenedList(payload.key_risks || firstCompany.risks).join(" ")
+            }
+            tone="red"
+          />
+          <ReportTextCard
+            title="Valuation & Outlook"
+            copy={
+              asString(payload.valuation_outlook)
+              || asString(firstCompany.valuation_view)
+              || asString(payload.comparative_view)
+              || asString(payload.investment_view)
+            }
+            tone="amber"
+          />
+        </div>
+
+        <div className="report-two-grid">
+          <Panel title="Research View" tone="green">
+            {payload.research_view || payload.investment_view}
+          </Panel>
+          <Panel title="Sector Context" tone="blue">
+            {payload.sector_context}
+          </Panel>
+        </div>
+
+        <Panel title="Source Quality" tone="blue">
+          {asString(
+            asRecord(payload.source_quality).quality_view,
+            sourceCountText(payload.sources_used)
+          )}
+        </Panel>
+
+        {companies.length > 1 && (
+          <section className="report-section">
+            <div className="report-section-title">
+              <span>02</span>
+              <h3>Company Details</h3>
+            </div>
+            {companies.map((company, index) => (
+              <ReportCompanyCard
+                company={company}
+                key={`${asString(company.ticker, "company")}-${index}`}
+              />
+            ))}
+          </section>
+        )}
+
+        <div className="report-two-grid">
+          <ListPanel title="Watchlist Triggers" items={payload.watchlist_triggers} tone="green" />
+          <ListPanel title="Next Checks" items={payload.next_checks} />
+        </div>
+
+        <Sources sources={payload.sources_used} />
+        <ConfidenceBreakdown breakdown={payload.confidence_breakdown} />
+      </div>
+    );
+  }
 
   if (route === "PRICE_QUERY") {
     return (
@@ -825,19 +1411,68 @@ function ResultBody({
 function AssistantResultMessage({
   result,
   fallbackDetail,
+  mode = "chat",
 }: {
   result: ApiResult;
   fallbackDetail: AnswerDetail;
+  mode?: WorkMode;
 }) {
+  const exportRef = useRef<HTMLElement | null>(null);
+  const [exporting, setExporting] = useState(false);
   const payload = result.response?.data || {};
   const score = getConfidenceScore(payload, result);
   const sourceCount = asList(payload.sources_used || payload.sources).length;
+  const sources = payload.sources_used || payload.sources;
+  const isReport = mode === "report";
+  const canExport =
+    isReport
+    || (result.answer_detail || fallbackDetail) === "detailed";
+  const reportTitle = `${getPayloadTitle(result.route, payload)} ${routeLabel(result.route)}`;
+
+  async function handleExportPdf() {
+    if (!exportRef.current) return;
+
+    setExporting(true);
+
+    try {
+      await exportElementToPdf(
+        exportRef.current,
+        reportTitle
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
-    <section className="result-shell assistant-message">
+    <section
+      className={`result-shell assistant-message ${isReport ? "report-result" : ""}`}
+      ref={exportRef}
+    >
+      {canExport && (
+        <div className="result-actions">
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={exporting}
+          >
+            {exporting ? "Preparing PDF..." : "Export PDF"}
+          </button>
+        </div>
+      )}
+      {isReport && (
+        <div className="report-cover">
+          <span>FinIntel analyst report</span>
+          <h2>{getPayloadTitle(result.route, payload)}</h2>
+          <p>{result.query}</p>
+        </div>
+      )}
       <div className="summary-grid">
         <section className="summary-card">
           <div className="summary-topline">
+            <span className={`badge ${isReport ? "badge-report" : ""}`}>
+              {modeLabel(mode)}
+            </span>
             <span className="badge">{routeLabel(result.route)}</span>
             <span className="badge badge-muted">
               {(result.answer_detail || fallbackDetail) === "detailed" ? "Detailed" : "Brief"}
@@ -856,7 +1491,7 @@ function AssistantResultMessage({
           </p>
           <div className="result-meta">
             <StatPill label="Route" value={routeLabel(result.route)} />
-            <StatPill label="Sources" value={sourceCount ? sourceCount : "Not provided"} />
+            <StatPill label="Verified sources" value={sourceCount ? sourceCount : "Not provided"} />
             <StatPill label="Routing confidence" value={formatPercent(result.routing?.confidence)} />
           </div>
         </section>
@@ -870,6 +1505,22 @@ function AssistantResultMessage({
           </div>
         </section>
       </div>
+
+      {sourceCount > 0 && (
+        <Sources
+          sources={sources}
+          compact
+        />
+      )}
+
+      <GuardrailNotice guardrails={payload.guardrails} />
+
+      {canExport && result.route !== "REPORT" && (
+        <AnalystReportTemplate
+          route={result.route}
+          payload={payload}
+        />
+      )}
 
       <ResultBody
         route={result.route}
@@ -899,6 +1550,7 @@ export default function App({
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authOpen, setAuthOpen] = useState(false);
   const [answerDetail, setAnswerDetail] = useState<AnswerDetail>("brief");
+  const [workMode, setWorkMode] = useState<WorkMode>("chat");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -1032,6 +1684,9 @@ export default function App({
     }
 
     const context = messages;
+    const effectiveAnswerDetail: AnswerDetail =
+      workMode === "report" ? "detailed" : answerDetail;
+    const submittedQuery = trimmed;
 
     setLoading(true);
     setError("");
@@ -1043,16 +1698,18 @@ export default function App({
         id: newMessageId("user"),
         role: "user",
         content: trimmed,
+        mode: workMode,
       },
     ]);
 
     try {
       const data = await fetchAnalysisStream(
-        trimmed,
+        submittedQuery,
         authToken,
-        answerDetail,
+        effectiveAnswerDetail,
         context,
         currentConversationId,
+        workMode,
         (progress) => {
           setProgressEvents((current) => [
             ...current,
@@ -1072,6 +1729,7 @@ export default function App({
           id: newMessageId("assistant"),
           role: "assistant",
           result: data,
+          mode: workMode,
         },
       ]);
       if (authToken) {
@@ -1123,9 +1781,31 @@ export default function App({
         </button>
 
         <section className="sidebar-section">
-          <div className="sidebar-title">Try asking</div>
+          <div className="sidebar-title">Mode</div>
+          <div className="mode-switch">
+            <button
+              className={workMode === "chat" ? "active" : ""}
+              type="button"
+              onClick={() => setWorkMode("chat")}
+            >
+              Chat
+            </button>
+            <button
+              className={workMode === "report" ? "active" : ""}
+              type="button"
+              onClick={() => setWorkMode("report")}
+            >
+              Generate report
+            </button>
+          </div>
+        </section>
+
+        <section className="sidebar-section">
+          <div className="sidebar-title">
+            {workMode === "report" ? "Report ideas" : "Try asking"}
+          </div>
           <div className="example-list">
-            {EXAMPLES.map((example) => (
+            {(workMode === "report" ? REPORT_EXAMPLES : EXAMPLES).map((example) => (
               <button
                 key={example}
                 type="button"
@@ -1180,7 +1860,9 @@ export default function App({
         <header className="chat-topbar">
           <div>
             <p className="eyebrow">AI equity research, grounded with sources</p>
-            <strong className="topbar-title">Research chat</strong>
+            <strong className="topbar-title">
+              {workMode === "report" ? "Report generator" : "Research chat"}
+            </strong>
           </div>
           <button
             className="nav-auth-button"
@@ -1198,8 +1880,9 @@ export default function App({
             <section className="welcome-panel">
               <h2>How can I help with Indian markets today?</h2>
               <p>
-                Ask about prices, ratios, company fundamentals, comparisons,
-                discovery screens, or news context.
+                {workMode === "report"
+                  ? "Enter a company, comparison, sector, or market theme to generate a structured analyst-style report."
+                  : "Ask about prices, ratios, company fundamentals, comparisons, discovery screens, or news context."}
               </p>
               <TrustStrip />
             </section>
@@ -1215,6 +1898,7 @@ export default function App({
                 <AssistantResultMessage
                   result={message.result}
                   fallbackDetail={answerDetail}
+                  mode={message.mode}
                 />
               </div>
             ) : (
@@ -1339,7 +2023,11 @@ export default function App({
             <strong>Analyzing market context</strong>
             <span>
               {progressEvents[progressEvents.length - 1]?.step
-                || "Routing, retrieving sources, and preparing a grounded answer."}
+                || (
+                  workMode === "report"
+                    ? "Routing, retrieving sources, and assembling a structured report."
+                    : "Routing, retrieving sources, and preparing a grounded answer."
+                )}
             </span>
             {progressEvents.length > 0 && (
               <ol className="progress-steps">
@@ -1369,21 +2057,40 @@ export default function App({
                     ? "Dev key mode"
                     : "Login required"}
             </span>
-            <div className="detail-toggle" aria-label="Answer detail">
-              <button
-                className={answerDetail === "brief" ? "active" : ""}
-                type="button"
-                onClick={() => setAnswerDetail("brief")}
-              >
-                Brief
-              </button>
-              <button
-                className={answerDetail === "detailed" ? "active" : ""}
-                type="button"
-                onClick={() => setAnswerDetail("detailed")}
-              >
-                Detailed
-              </button>
+            <div className="composer-actions">
+              <div className="mode-switch mode-switch-inline" aria-label="Work mode">
+                <button
+                  className={workMode === "chat" ? "active" : ""}
+                  type="button"
+                  onClick={() => setWorkMode("chat")}
+                >
+                  Chat
+                </button>
+                <button
+                  className={workMode === "report" ? "active" : ""}
+                  type="button"
+                  onClick={() => setWorkMode("report")}
+                >
+                  Report
+                </button>
+              </div>
+              <div className="detail-toggle" aria-label="Answer detail">
+                <button
+                  className={workMode === "chat" && answerDetail === "brief" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAnswerDetail("brief")}
+                  disabled={workMode === "report"}
+                >
+                  Brief
+                </button>
+                <button
+                  className={workMode === "report" || answerDetail === "detailed" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAnswerDetail("detailed")}
+                >
+                  Detailed
+                </button>
+              </div>
             </div>
           </div>
           <label className="sr-only" htmlFor="query">Ask FinIntel</label>
@@ -1398,11 +2105,15 @@ export default function App({
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder="Ask about HDFC Bank, ROE, IT stocks, or latest market news"
+              placeholder={
+                workMode === "report"
+                  ? "Enter companies or a theme, e.g. HDFC Bank vs ICICI Bank or undervalued IT stocks"
+                  : "Ask about HDFC Bank, ROE, IT stocks, or latest market news"
+              }
               rows={2}
             />
             <button disabled={loading || !query.trim()} type="submit">
-              {loading ? "..." : "Analyze"}
+              {loading ? "..." : workMode === "report" ? "Generate report" : "Analyze"}
             </button>
           </div>
         </form>

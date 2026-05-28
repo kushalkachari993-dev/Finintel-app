@@ -12,6 +12,8 @@
     "@clerk/clerk-react": "^5.61.7",
     "@sentry/react": "^10.54.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "typescript": "^5.8.3",

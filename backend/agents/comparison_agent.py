@@ -36,6 +36,10 @@ from backend.schemas.comparison_schema import (
 from backend.utils.confidence_engine import (
     ConfidenceEngine
 )
+from backend.agents.detail_guidance import (
+    answer_detail_guidance,
+    answer_detail_tokens
+)
 from backend.utils.provider_errors import (
     safe_provider_error
 )
@@ -461,7 +465,8 @@ class ComparisonAgent:
         self,
         query: str,
         intelligence: dict = None,
-        model: str | None = None
+        model: str | None = None,
+        answer_detail: str = "brief"
     ):
 
         intelligence = (
@@ -498,6 +503,9 @@ class ComparisonAgent:
             intelligence.get(
                 "sector"
             )
+        )
+        detail_guidance = answer_detail_guidance(
+            answer_detail
         )
 
         # ---------------------------------------------------
@@ -731,6 +739,9 @@ COMPANY DATA:
 TRUSTED COMPANY CONTEXT:
 {json.dumps(company_contexts, indent=2)}
 
+ANSWER DETAIL:
+{detail_guidance}
+
 Return ONLY valid JSON.
 
 FORMAT:
@@ -793,7 +804,11 @@ FORMAT:
 
                     temperature=0.2,
 
-                    max_tokens=1800,
+                    max_tokens=answer_detail_tokens(
+                        answer_detail,
+                        brief_tokens=1800,
+                        detailed_tokens=2800
+                    ),
                 )
             )
 
