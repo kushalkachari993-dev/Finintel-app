@@ -165,3 +165,37 @@ def test_migration_runner_handles_precreated_audit_table(tmp_path):
             "chat_audit"
         )
     )
+
+
+def test_migration_runner_handles_partially_upgraded_audit_table(tmp_path):
+    database_path = str(
+        tmp_path / "finintel.sqlite3"
+    )
+
+    store = ChatAuditStore(
+        database_path=database_path
+    )
+
+    with store.connect() as connection:
+        ChatAuditStore.ensure_payload_columns(
+            connection
+        )
+
+    applied = MigrationRunner(
+        database_path
+    ).apply_pending()
+
+    assert applied == [
+        "001",
+        "002",
+        "003",
+        "004",
+        "005"
+    ]
+    assert migration_versions(database_path) == [
+        "001",
+        "002",
+        "003",
+        "004",
+        "005"
+    ]

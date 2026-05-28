@@ -85,6 +85,28 @@ class MigrationRunner:
             for row in rows
         }
 
+    @staticmethod
+    def execute_migration_sql(
+        connection,
+        sql: str
+    ):
+        statements = [
+            statement.strip()
+            for statement in sql.split(";")
+            if statement.strip()
+        ]
+
+        for statement in statements:
+            try:
+                connection.execute(
+                    statement
+                )
+            except sqlite3.OperationalError as error:
+                if "duplicate column name" in str(error).lower():
+                    continue
+
+                raise
+
     def apply_pending(self) -> list[str]:
         applied = []
 
@@ -106,7 +128,8 @@ class MigrationRunner:
                     encoding="utf-8"
                 )
 
-                connection.executescript(
+                self.execute_migration_sql(
+                    connection,
                     sql
                 )
                 connection.execute(
