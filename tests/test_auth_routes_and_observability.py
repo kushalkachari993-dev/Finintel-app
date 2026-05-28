@@ -252,6 +252,28 @@ def test_metrics_and_observability_endpoints(monkeypatch, tmp_path):
     assert "FinIntel Observability" in dashboard.text
 
 
+def test_uptime_monitor_head_requests(monkeypatch, tmp_path):
+    configure_auth_routes(
+        monkeypatch,
+        tmp_path
+    )
+
+    with TestClient(
+        main.app
+    ) as client:
+        root = client.head(
+            "/"
+        )
+        health = client.head(
+            "/health"
+        )
+
+    assert root.status_code == 200
+    assert health.status_code == 200
+    assert root.text == ""
+    assert health.text == ""
+
+
 def test_chat_history_requires_authentication(monkeypatch, tmp_path):
     configure_auth_routes(
         monkeypatch,

@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.responses import JSONResponse
 from fastapi.responses import PlainTextResponse
+from fastapi.responses import Response
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
@@ -533,6 +534,14 @@ def root():
         "healthy"
     }
 
+
+@app.head("/")
+def root_head():
+
+    return Response(
+        status_code=200
+    )
+
 # ---------------------------------------------------
 # HEALTH CHECK
 # ---------------------------------------------------
@@ -556,6 +565,14 @@ def health():
             "news_agent"
         ]
     }
+
+
+@app.head("/health")
+def health_head():
+
+    return Response(
+        status_code=200
+    )
 
 
 def user_payload(user):
