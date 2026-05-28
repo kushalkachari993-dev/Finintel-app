@@ -1,0 +1,57 @@
+name: Deployed E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_ai:
+        description: "Run live AI checks that consume provider quota"
+        required: false
+        default: "false"
+  schedule:
+    - cron: "30 3 * * *"
+
+concurrency:
+  group: deployed-e2e
+  cancel-in-progress: false
+
+jobs:
+  deployed-smoke:
+    name: Deployed Smoke
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run deployed smoke tests
+        env:
+          E2E_FRONTEND_URL: ${{ vars.E2E_FRONTEND_URL || 'https://finintel-ai-frontend.onrender.com' }}
+          E2E_BACKEND_URL: ${{ vars.E2E_BACKEND_URL || 'https://finintel-ai-backend.onrender.com' }}
+          E2E_RUN_LIVE_AI: ${{ github.event.inputs.run_live_ai || 'false' }}
+          E2E_BACKEND_API_KEY: ${{ secrets.E2E_BACKEND_API_KEY }}
+        run: npm run test:e2e:deployed
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
