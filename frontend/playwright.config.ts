@@ -1,7 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const useLocalPreview = process.env.E2E_USE_LOCAL_PREVIEW === "true";
 const frontendUrl =
-  process.env.E2E_FRONTEND_URL || "https://finintel-ai-frontend.onrender.com";
+  process.env.E2E_FRONTEND_URL ||
+  (useLocalPreview
+    ? "http://127.0.0.1:4173"
+    : "https://finintel-ai-frontend.onrender.com");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -24,6 +28,14 @@ export default defineConfig({
       "X-FinIntel-E2E": "true",
     },
   },
+  webServer: useLocalPreview
+    ? {
+        command: "npm run preview -- --host 127.0.0.1 --port 4173",
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        url: frontendUrl,
+      }
+    : undefined,
   projects: [
     {
       name: "chromium",
