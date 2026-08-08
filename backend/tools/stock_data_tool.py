@@ -4,6 +4,10 @@ from datetime import timezone
 
 import yfinance as yf
 
+from backend.tools.alpha_vantage_tool import (
+    AlphaVantageTool
+)
+
 from backend.config.settings import (
     STOCK_DATA_CACHE_SECONDS
 )
@@ -39,6 +43,7 @@ class StockDataTool:
 
     gemini_grounded_price_tool = GeminiGroundedPriceTool()
     web_price_search_tool = WebPriceSearchTool()
+    alpha_vantage_tool = AlphaVantageTool()
 
     # ---------------------------------------------------
     # GET STOCK DATA
@@ -79,6 +84,7 @@ class StockDataTool:
 
             company_name = (
                 info.get("longName")
+                or company_name
             )
 
             sector = (
@@ -401,6 +407,44 @@ class StockDataTool:
                 ).isoformat()
             }
 
+            if current_price is None:
+                alpha_vantage_result = (
+                    self.alpha_vantage_tool
+                    .get_quote_data(
+                        ticker=ticker,
+                        company_name=company_name
+                    )
+                )
+
+                if (
+                    alpha_vantage_result
+                    and "error" not in alpha_vantage_result
+                ):
+                    price_fields = {
+                        "current_price",
+                        "currency",
+                        "exchange",
+                        "provider",
+                        "price_freshness",
+                        "price_date",
+                        "source_url",
+                    }
+
+                    result.update(
+                        {
+                            key: alpha_vantage_result.get(key)
+                            for key in price_fields
+                            if alpha_vantage_result.get(key) is not None
+                        }
+                    )
+                    result["data_quality_score"] = max(
+                        data_quality_score,
+                        alpha_vantage_result.get(
+                            "data_quality_score",
+                            0.0
+                        )
+                    )
+
             return self.cache.set(
                 cache_key,
                 result
@@ -412,6 +456,24 @@ class StockDataTool:
                 "stock_data_fetch_failed ticker=%s",
                 ticker
             )
+
+            alpha_vantage_result = (
+                self.alpha_vantage_tool
+                .get_quote_data(
+                    ticker=ticker,
+                    company_name=company_name
+                )
+            )
+
+            if (
+                alpha_vantage_result
+                and "error" not in alpha_vantage_result
+            ):
+
+                return self.cache.set(
+                    cache_key,
+                    alpha_vantage_result
+                )
 
             gemini_price_result = (
                 self.gemini_grounded_price_tool

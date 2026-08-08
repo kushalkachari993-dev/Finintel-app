@@ -300,7 +300,12 @@ class PriceAgent:
 
         response_confidence = confidence
 
-        if provider in {
+        if provider == "alpha_vantage":
+            response_confidence = min(
+                confidence,
+                0.7
+            )
+        elif provider in {
             "gemini_grounded_search",
             "tavily_web_search"
         }:
@@ -311,7 +316,23 @@ class PriceAgent:
 
         if current_price:
 
-            if provider in {
+            if provider == "alpha_vantage":
+                price_date = stock_data.get(
+                    "price_date"
+                )
+                date_detail = (
+                    f" dated {price_date}"
+                    if price_date
+                    else ""
+                )
+                message = (
+                    f"{resolved_company_name} has a latest available "
+                    f"Alpha Vantage price of INR {current_price}{date_detail}. "
+                    "This is structured end-of-day data and may not reflect "
+                    "intraday market movement."
+                )
+
+            elif provider in {
                 "gemini_grounded_search",
                 "tavily_web_search"
             }:

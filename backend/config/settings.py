@@ -35,6 +35,22 @@ TWELVE_DATA_BASE_URL = os.getenv(
     "https://api.twelvedata.com"
 ).rstrip("/")
 
+ALPHA_VANTAGE_API_KEY = os.getenv(
+    "ALPHA_VANTAGE_API_KEY"
+)
+
+ALPHA_VANTAGE_BASE_URL = os.getenv(
+    "ALPHA_VANTAGE_BASE_URL",
+    "https://www.alphavantage.co/query"
+)
+
+ALPHA_VANTAGE_CACHE_SECONDS = int(
+    os.getenv(
+        "ALPHA_VANTAGE_CACHE_SECONDS",
+        "3600"
+    )
+)
+
 APP_ENV = os.getenv(
     "APP_ENV",
     "development"

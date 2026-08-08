@@ -169,9 +169,35 @@ def test_stock_data_tool_uses_web_search_when_yfinance_fails(monkeypatch):
                 "data_quality_score": 0.2,
             }
 
+    class EmptyStructuredOrGroundedFallback:
+
+        def get_quote_data(
+            self,
+            ticker,
+            company_name=None
+        ):
+            return None
+
+        def search_price(
+            self,
+            ticker,
+            company_name=None
+        ):
+            return None
+
     monkeypatch.setattr(
         "backend.tools.stock_data_tool.yf.Ticker",
         FailingTicker
+    )
+    monkeypatch.setattr(
+        tool,
+        "alpha_vantage_tool",
+        EmptyStructuredOrGroundedFallback()
+    )
+    monkeypatch.setattr(
+        tool,
+        "gemini_grounded_price_tool",
+        EmptyStructuredOrGroundedFallback()
     )
     monkeypatch.setattr(
         tool,

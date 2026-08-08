@@ -118,6 +118,15 @@ def test_stock_data_tool_uses_gemini_before_tavily_when_yfinance_fails(monkeypat
                 "data_quality_score": 0.25,
             }
 
+    class EmptyAlphaVantageTool:
+
+        def get_quote_data(
+            self,
+            ticker,
+            company_name=None
+        ):
+            return None
+
     class FailingWebPriceSearchTool:
 
         def search_price(
@@ -130,6 +139,11 @@ def test_stock_data_tool_uses_gemini_before_tavily_when_yfinance_fails(monkeypat
     monkeypatch.setattr(
         "backend.tools.stock_data_tool.yf.Ticker",
         FailingTicker
+    )
+    monkeypatch.setattr(
+        tool,
+        "alpha_vantage_tool",
+        EmptyAlphaVantageTool()
     )
     monkeypatch.setattr(
         tool,
@@ -173,6 +187,15 @@ def test_stock_data_tool_uses_tavily_when_gemini_is_unavailable(monkeypatch):
                 "error": "Gemini unavailable"
             }
 
+    class EmptyAlphaVantageTool:
+
+        def get_quote_data(
+            self,
+            ticker,
+            company_name=None
+        ):
+            return None
+
     class FakeWebPriceSearchTool:
 
         def search_price(
@@ -190,6 +213,11 @@ def test_stock_data_tool_uses_tavily_when_gemini_is_unavailable(monkeypatch):
     monkeypatch.setattr(
         "backend.tools.stock_data_tool.yf.Ticker",
         FailingTicker
+    )
+    monkeypatch.setattr(
+        tool,
+        "alpha_vantage_tool",
+        EmptyAlphaVantageTool()
     )
     monkeypatch.setattr(
         tool,

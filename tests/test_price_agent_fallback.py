@@ -109,3 +109,41 @@ def test_price_agent_labels_gemini_grounded_price(monkeypatch):
     assert response["data"]["confidence_score"] == 0.55
     assert "Google-grounded web search" in response["data"]["message"]
     assert "may be delayed" in response["data"]["message"]
+
+
+def test_price_agent_labels_alpha_vantage_price_as_end_of_day(monkeypatch):
+    agent = PriceAgent()
+
+    monkeypatch.setattr(
+        agent.ticker_resolver,
+        "resolve",
+        lambda query: {
+            "ticker": "HDFCBANK.NS",
+            "company_name": "HDFC Bank",
+            "confidence": 0.97
+        }
+    )
+    monkeypatch.setattr(
+        agent.stock_tool,
+        "get_stock_data",
+        lambda ticker, company_name=None: {
+            "company_name": "HDFC Bank",
+            "current_price": 731.25,
+            "market_cap": None,
+            "pe_ratio": None,
+            "sector": None,
+            "currency": "INR",
+            "provider": "alpha_vantage",
+            "price_date": "2026-08-08",
+        }
+    )
+
+    response = agent.get_price(
+        "Current price of HDFC Bank"
+    )
+
+    assert response["success"] is True
+    assert response["data"]["confidence_score"] == 0.7
+    assert "Alpha Vantage" in response["data"]["message"]
+    assert "2026-08-08" in response["data"]["message"]
+    assert "end-of-day" in response["data"]["message"]
