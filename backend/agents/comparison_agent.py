@@ -553,13 +553,19 @@ class ComparisonAgent:
             True
         }
 
+        comparison_type = (
+            analysis_focus[0]
+            if analysis_focus
+            else (
+                "Peer Comparison"
+                if len(resolved_companies) >= 2
+                else "GENERAL"
+            )
+        )
+
         parsed = {
             "comparison_type":
-            (
-                analysis_focus[0]
-                if analysis_focus
-                else "GENERAL"
-            ),
+            comparison_type,
 
             "companies_compared":
             companies_compared,
@@ -1099,7 +1105,11 @@ FORMAT:
             ] = (
                 analysis_focus[0]
                 if analysis_focus
-                else "GENERAL"
+                else (
+                    "Peer Comparison"
+                    if len(comparison_data) >= 2
+                    else "GENERAL"
+                )
             )
 
         # ---------------------------------------------------

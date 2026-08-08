@@ -40,6 +40,7 @@ def test_comparison_returns_partial_response_when_live_data_is_unavailable(monke
 
     assert response["success"] is True
     assert response["error"] is None
+    assert response["data"]["comparison_type"] == "Peer Comparison"
     assert response["data"]["companies_compared"] == [
         "HDFC Bank",
         "ICICI Bank"
@@ -84,6 +85,7 @@ def test_comparison_returns_partial_response_with_one_successful_company(monkeyp
     )
 
     assert response["success"] is True
+    assert response["data"]["comparison_type"] == "Peer Comparison"
     assert response["data"]["confidence_score"] == 0.45
     assert response["data"]["confidence_breakdown"]["retrieval_score"] == 0.5
     assert any(
