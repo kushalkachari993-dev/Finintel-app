@@ -72,3 +72,40 @@ def test_price_agent_labels_web_observed_price_as_delayed(monkeypatch):
     assert response["data"]["confidence_score"] == 0.55
     assert "web-observed" in response["data"]["message"]
     assert "may be delayed" in response["data"]["message"]
+
+
+def test_price_agent_labels_gemini_grounded_price(monkeypatch):
+    agent = PriceAgent()
+
+    monkeypatch.setattr(
+        agent.ticker_resolver,
+        "resolve",
+        lambda query: {
+            "ticker": "HDFCBANK.NS",
+            "company_name": "HDFC Bank",
+            "confidence": 0.97
+        }
+    )
+    monkeypatch.setattr(
+        agent.stock_tool,
+        "get_stock_data",
+        lambda ticker, company_name=None: {
+            "company_name": "HDFC Bank",
+            "current_price": 731.25,
+            "market_cap": None,
+            "pe_ratio": None,
+            "sector": None,
+            "currency": "INR",
+            "provider": "gemini_grounded_search",
+            "source_url": "https://www.tickertape.in/example",
+        }
+    )
+
+    response = agent.get_price(
+        "Current price of HDFC Bank"
+    )
+
+    assert response["success"] is True
+    assert response["data"]["confidence_score"] == 0.55
+    assert "Google-grounded web search" in response["data"]["message"]
+    assert "may be delayed" in response["data"]["message"]

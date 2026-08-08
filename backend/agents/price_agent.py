@@ -300,7 +300,10 @@ class PriceAgent:
 
         response_confidence = confidence
 
-        if provider == "tavily_web_search":
+        if provider in {
+            "gemini_grounded_search",
+            "tavily_web_search"
+        }:
             response_confidence = min(
                 confidence,
                 0.55
@@ -308,16 +311,24 @@ class PriceAgent:
 
         if current_price:
 
-            if provider == "tavily_web_search":
+            if provider in {
+                "gemini_grounded_search",
+                "tavily_web_search"
+            }:
 
                 source_url = stock_data.get(
                     "source_url"
                 )
+                provider_label = (
+                    "Google-grounded web search"
+                    if provider == "gemini_grounded_search"
+                    else "trusted web-search result"
+                )
 
                 message = (
                     f"{resolved_company_name} has a latest web-observed "
-                    f"price of INR {current_price}. This was extracted from "
-                    "a trusted web-search result and may be delayed; verify "
+                    f"price of INR {current_price}. This was extracted using "
+                    f"{provider_label} and may be delayed; verify "
                     "with the exchange or broker before relying on it."
                 )
 

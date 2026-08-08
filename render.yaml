@@ -26,6 +26,10 @@ services:
         sync: false
       - key: TAVILY_API_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_GROUNDED_MODEL
+        value: "gemini-2.5-flash-lite"
       - key: TWELVE_DATA_API_KEY
         sync: false
       - key: APP_API_KEY

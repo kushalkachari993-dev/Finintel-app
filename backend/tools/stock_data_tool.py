@@ -16,6 +16,10 @@ from backend.tools.financial_validator import (
     FinancialValidator
 )
 
+from backend.tools.gemini_grounded_price_tool import (
+    GeminiGroundedPriceTool
+)
+
 from backend.tools.web_price_search_tool import (
     WebPriceSearchTool
 )
@@ -33,6 +37,7 @@ class StockDataTool:
         namespace="stock_data"
     )
 
+    gemini_grounded_price_tool = GeminiGroundedPriceTool()
     web_price_search_tool = WebPriceSearchTool()
 
     # ---------------------------------------------------
@@ -407,6 +412,24 @@ class StockDataTool:
                 "stock_data_fetch_failed ticker=%s",
                 ticker
             )
+
+            gemini_price_result = (
+                self.gemini_grounded_price_tool
+                .search_price(
+                    ticker=ticker,
+                    company_name=company_name
+                )
+            )
+
+            if (
+                gemini_price_result
+                and "error" not in gemini_price_result
+            ):
+
+                return self.cache.set(
+                    cache_key,
+                    gemini_price_result
+                )
 
             web_price_result = (
                 self.web_price_search_tool
