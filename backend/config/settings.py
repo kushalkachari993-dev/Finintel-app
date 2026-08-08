@@ -17,6 +17,15 @@ TAVILY_API_KEY = os.getenv(
     "TAVILY_API_KEY"
 )
 
+TWELVE_DATA_API_KEY = os.getenv(
+    "TWELVE_DATA_API_KEY"
+)
+
+TWELVE_DATA_BASE_URL = os.getenv(
+    "TWELVE_DATA_BASE_URL",
+    "https://api.twelvedata.com"
+).rstrip("/")
+
 APP_ENV = os.getenv(
     "APP_ENV",
     "development"

@@ -16,6 +16,10 @@ from backend.tools.financial_validator import (
     FinancialValidator
 )
 
+from backend.tools.web_price_search_tool import (
+    WebPriceSearchTool
+)
+
 from backend.utils.simple_cache import build_cache
 
 
@@ -29,13 +33,16 @@ class StockDataTool:
         namespace="stock_data"
     )
 
+    web_price_search_tool = WebPriceSearchTool()
+
     # ---------------------------------------------------
     # GET STOCK DATA
     # ---------------------------------------------------
 
     def get_stock_data(
         self,
-        ticker: str
+        ticker: str,
+        company_name: str | None = None
     ):
 
         cache_key = ticker.strip().upper()
@@ -401,8 +408,29 @@ class StockDataTool:
                 ticker
             )
 
-            return {
+            web_price_result = (
+                self.web_price_search_tool
+                .search_price(
+                    ticker=ticker,
+                    company_name=company_name
+                )
+            )
+
+            if (
+                web_price_result
+                and "error" not in web_price_result
+            ):
+
+                return self.cache.set(
+                    cache_key,
+                    web_price_result
+                )
+
+            return self.cache.set(
+                cache_key,
+                {
 
                 "error":
                 str(e)
-            }
+                }
+            )

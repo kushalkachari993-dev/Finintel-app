@@ -16,7 +16,7 @@ def test_price_agent_returns_successful_fallback_when_live_data_unavailable(monk
     monkeypatch.setattr(
         agent.stock_tool,
         "get_stock_data",
-        lambda ticker: {
+        lambda ticker, company_name=None: {
             "error": "market data provider unavailable"
         }
     )
@@ -34,3 +34,41 @@ def test_price_agent_returns_successful_fallback_when_live_data_unavailable(monk
     assert response["data"]["confidence_score"] == 0.35
     assert "could not be fetched" in response["data"]["message"]
     assert "Could not fetch stock data" not in response["data"]["message"]
+
+
+def test_price_agent_labels_web_observed_price_as_delayed(monkeypatch):
+    agent = PriceAgent()
+
+    monkeypatch.setattr(
+        agent.ticker_resolver,
+        "resolve",
+        lambda query: {
+            "ticker": "HDFCBANK.NS",
+            "company_name": "HDFC Bank",
+            "confidence": 0.97
+        }
+    )
+    monkeypatch.setattr(
+        agent.stock_tool,
+        "get_stock_data",
+        lambda ticker, company_name=None: {
+            "company_name": "HDFC Bank",
+            "current_price": 731.25,
+            "market_cap": None,
+            "pe_ratio": None,
+            "sector": None,
+            "currency": "INR",
+            "provider": "tavily_web_search",
+            "source_url": "https://www.moneycontrol.com/example",
+        }
+    )
+
+    response = agent.get_price(
+        "Current price of HDFC Bank"
+    )
+
+    assert response["success"] is True
+    assert response["data"]["current_price"] == 731.25
+    assert response["data"]["confidence_score"] == 0.55
+    assert "web-observed" in response["data"]["message"]
+    assert "may be delayed" in response["data"]["message"]

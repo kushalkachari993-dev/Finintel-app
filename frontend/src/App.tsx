@@ -218,8 +218,12 @@ function formatPercent(value: unknown) {
 }
 
 function formatPrice(value: unknown, currency = "INR") {
+  if (value === null || value === undefined || value === "") {
+    return "Unavailable";
+  }
+
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return value;
+  if (!Number.isFinite(numeric)) return value || "Unavailable";
 
   return new Intl.NumberFormat("en-IN", {
     style: "currency",

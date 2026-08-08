@@ -14,6 +14,7 @@ from backend.config.settings import (
 
 from backend.utils.simple_cache import build_cache
 from backend.tools.symbol_registry import SymbolRegistry
+from backend.tools.twelve_data_tool import TwelveDataTool
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class TickerResolver:
         )
 
         self.symbol_registry = SymbolRegistry()
+        self.twelve_data_tool = TwelveDataTool()
 
     # =====================================================
     # SAFE NORMALIZER
@@ -358,6 +360,20 @@ QUERY:
                 self.symbol_registry.to_ticker_result(
                     local_company
                 )
+            )
+
+        twelve_data_match = (
+            self.twelve_data_tool
+            .resolve_symbol(
+                company_name
+            )
+        )
+
+        if twelve_data_match:
+
+            return self.cache.set(
+                cache_key,
+                twelve_data_match
             )
 
         # -------------------------------------------------

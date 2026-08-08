@@ -218,7 +218,8 @@ class PriceAgent:
 
             self.stock_tool
             .get_stock_data(
-                ticker
+                ticker,
+                company_name=company_name
             )
         )
 
@@ -281,6 +282,10 @@ class PriceAgent:
             "INR"
         )
 
+        provider = stock_data.get(
+            "provider"
+        )
+
         resolved_company_name = (
 
             stock_data.get(
@@ -293,9 +298,35 @@ class PriceAgent:
         # BUILD MESSAGE
         # ---------------------------------------------------
 
+        response_confidence = confidence
+
+        if provider == "tavily_web_search":
+            response_confidence = min(
+                confidence,
+                0.55
+            )
+
         if current_price:
 
-            if answer_detail == "detailed":
+            if provider == "tavily_web_search":
+
+                source_url = stock_data.get(
+                    "source_url"
+                )
+
+                message = (
+                    f"{resolved_company_name} has a latest web-observed "
+                    f"price of INR {current_price}. This was extracted from "
+                    "a trusted web-search result and may be delayed; verify "
+                    "with the exchange or broker before relying on it."
+                )
+
+                if source_url:
+                    message = (
+                        f"{message} Source: {source_url}"
+                    )
+
+            elif answer_detail == "detailed":
 
                 message = (
                     f"{resolved_company_name} is currently trading at "
@@ -358,7 +389,7 @@ class PriceAgent:
             currency,
 
             "confidence_score":
-            confidence,
+            response_confidence,
 
             "disclaimer":
             (
