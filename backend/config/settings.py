@@ -75,17 +75,17 @@ SENTRY_TRACES_SAMPLE_RATE = float(
 
 GROQ_MODEL = os.getenv(
     "GROQ_MODEL",
-    "llama-3.3-70b-versatile"
+    "openai/gpt-oss-120b"
 )
 
 GROQ_FAST_MODEL = os.getenv(
     "GROQ_FAST_MODEL",
-    "llama-3.1-8b-instant"
+    "openai/gpt-oss-20b"
 )
 
 GROQ_COMPLEX_MODEL = os.getenv(
     "GROQ_COMPLEX_MODEL",
-    "llama-3.3-70b-versatile"
+    "openai/gpt-oss-120b"
 )
 
 BACKEND_API_URL = os.getenv(

@@ -45,11 +45,11 @@ services:
           name: finintel-ai-postgres
           property: connectionString
       - key: GROQ_FAST_MODEL
-        value: "llama-3.1-8b-instant"
+        value: "openai/gpt-oss-20b"
       - key: GROQ_COMPLEX_MODEL
-        value: "llama-3.3-70b-versatile"
+        value: "openai/gpt-oss-120b"
       - key: GROQ_MODEL
-        value: "llama-3.3-70b-versatile"
+        value: "openai/gpt-oss-120b"
       - key: RATE_LIMIT_PER_MINUTE
         value: "30"
       - key: CHAT_EXECUTION_TIMEOUT_SECONDS
