@@ -1,3 +1,5 @@
+import logging
+
 from backend.tools.stock_data_tool import (
     StockDataTool
 )
@@ -9,6 +11,9 @@ from backend.tools.ticker_resolver import (
 from backend.schemas.price_schema import (
     PriceResponse
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class PriceAgent:
@@ -24,6 +29,95 @@ class PriceAgent:
         self.ticker_resolver = (
             TickerResolver()
         )
+
+    # ---------------------------------------------------
+    # UNAVAILABLE PRICE FALLBACK
+    # ---------------------------------------------------
+
+    def build_unavailable_price_response(
+        self,
+        query: str,
+        ticker: str,
+        company_name: str,
+        confidence: float,
+        fetch_error: str | None = None
+    ):
+
+        fallback_confidence = min(
+            confidence,
+            0.35
+        )
+
+        message = (
+            f"{company_name} ({ticker}) was identified, but live stock "
+            "price data could not be fetched for this request. This can "
+            "happen when the market-data provider is temporarily unavailable "
+            "or blocks cloud-hosted requests. Please retry, or use a report "
+            "for qualitative context while live price data is unavailable."
+        )
+
+        response_payload = {
+
+            "query_type":
+            "PRICE_QUERY",
+
+            "company_name":
+            company_name,
+
+            "ticker":
+            ticker,
+
+            "current_price":
+            None,
+
+            "market_cap":
+            None,
+
+            "pe_ratio":
+            None,
+
+            "sector":
+            None,
+
+            "currency":
+            "INR",
+
+            "confidence_score":
+            fallback_confidence,
+
+            "disclaimer":
+            (
+                "This information is for educational purposes only "
+                "and is not investment advice."
+            ),
+
+            "message":
+            message
+        }
+
+        validated = (
+            PriceResponse(
+                **response_payload
+            )
+        )
+
+        logger.warning(
+            "price_data_unavailable_fallback query=%r ticker=%s error=%r",
+            query,
+            ticker,
+            fetch_error
+        )
+
+        return {
+            "success":
+            True,
+
+            "data":
+            validated.model_dump(),
+
+            "error":
+            None
+        }
 
     # ---------------------------------------------------
     # CLEAN QUERY
@@ -143,15 +237,24 @@ class PriceAgent:
             )
         ):
 
-            return {
+            fetch_error = (
+                stock_data.get(
+                    "error"
+                )
+                if isinstance(
+                    stock_data,
+                    dict
+                )
+                else None
+            )
 
-                "success": False,
-
-                "data": None,
-
-                "error":
-                "Could not fetch stock data."
-            }
+            return self.build_unavailable_price_response(
+                query=query,
+                ticker=ticker,
+                company_name=company_name,
+                confidence=confidence,
+                fetch_error=fetch_error
+            )
 
         # ---------------------------------------------------
         # EXTRACT DATA SAFELY
