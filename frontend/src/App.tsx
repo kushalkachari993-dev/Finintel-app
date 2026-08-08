@@ -64,6 +64,38 @@ type AnswerDetail = "brief" | "detailed";
 
 type WorkMode = "chat" | "report";
 
+const MODE_COPY: Record<
+  WorkMode,
+  {
+    eyebrow: string;
+    title: string;
+    welcome: string;
+    placeholder: string;
+    loading: string;
+    submit: string;
+  }
+> = {
+  chat: {
+    eyebrow: "AI equity research, grounded with sources",
+    title: "Research chat",
+    welcome:
+      "Ask about prices, ratios, company fundamentals, comparisons, discovery screens, or news context.",
+    placeholder: "Ask about HDFC Bank, ROE, IT stocks, or latest market news",
+    loading: "Routing, retrieving sources, and preparing a grounded answer.",
+    submit: "Analyze",
+  },
+  report: {
+    eyebrow: "Structured research briefs with export",
+    title: "Report generator",
+    welcome:
+      "Enter a company, comparison, sector, or market theme to generate a structured analyst-style report.",
+    placeholder:
+      "Enter companies or a theme, e.g. HDFC Bank vs ICICI Bank or undervalued IT stocks",
+    loading: "Routing, retrieving sources, and assembling a structured report.",
+    submit: "Generate report",
+  },
+};
+
 type AuthUser = {
   user_id: number;
   email: string;
@@ -406,6 +438,36 @@ function confidenceLabel(score: number) {
   return "Low";
 }
 
+function progressPercent(events: ProgressEvent[]) {
+  const latest = events[events.length - 1];
+
+  if (latest?.total && latest.total > 0) {
+    return Math.min(
+      96,
+      Math.max(
+        16,
+        Math.round((latest.index / latest.total) * 100)
+      )
+    );
+  }
+
+  return events.length ? 52 : 16;
+}
+
+function formatHistoryDate(value: number) {
+  const timestamp = value > 10_000_000_000 ? value : value * 1000;
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
 function getPayloadTitle(route: Route, payload: Record<string, unknown>) {
   if (route === "REPORT") return asString(payload.report_title) || "Analyst Report";
   if (route === "DISCOVERY") return "Discovery Ideas";
@@ -428,6 +490,92 @@ function getRouteSummary(route: Route, payload: Record<string, unknown>) {
   if (route === "NEWS") return payload.headline_summary;
   if (route === "COMPARISON") return payload.summary;
   return payload.overall_view || payload.business_overview;
+}
+
+function firstFlattenedText(...values: unknown[]) {
+  for (const value of values) {
+    const [first] = flattenedList(value);
+
+    if (first) {
+      return first;
+    }
+  }
+
+  return "";
+}
+
+function conciseSnapshotText(value: unknown, fallback = "Not highlighted") {
+  const text = asString(value, fallback).trim() || fallback;
+
+  if (text.length <= 180) {
+    return text;
+  }
+
+  return `${text.slice(0, 177).trim()}...`;
+}
+
+function getSnapshotView(route: Route, payload: Record<string, unknown>) {
+  const directView = firstText(payload, [
+    "recommendation",
+    "investment_view",
+    "overall_view",
+    "balanced_view",
+    "sentiment",
+    "winner_summary",
+    "valuation_outlook",
+    "analyst_takeaway",
+  ]);
+
+  if (directView) {
+    return directView;
+  }
+
+  if (route === "PRICE_QUERY") return "Price and market context";
+  if (route === "EDUCATIONAL") return "Learning context";
+  if (route === "DISCOVERY") return "Discovery screen";
+  if (route === "NEWS") return "News impact context";
+  if (route === "COMPARISON") return "Comparative research view";
+  if (route === "REPORT") return "Analyst report view";
+
+  return "Fundamental research view";
+}
+
+function getSnapshotReason(route: Route, payload: Record<string, unknown>) {
+  return firstFlattenedText(
+    getRouteSummary(route, payload),
+    payload.executive_summary,
+    payload.stock_overview,
+    payload.summary,
+    payload.message,
+    payload.business_overview,
+    payload.market_impact,
+    payload.simple_definition,
+    payload.routing_reason
+  );
+}
+
+function getSnapshotRisk(payload: Record<string, unknown>) {
+  const guardrails = asRecord(payload.guardrails);
+  const companies = asList(payload.companies).map((company) => asRecord(company));
+  const companyRisks = companies.flatMap((company) =>
+    flattenedList(
+      company.risks
+      || company.risk_factors
+      || company.financial_risks
+      || company.risk_assessment
+    )
+  );
+
+  return firstFlattenedText(
+    payload.risk_assessment,
+    payload.key_risks,
+    payload.risk_factors,
+    payload.financial_risks,
+    payload.risks,
+    payload.limitations,
+    companyRisks,
+    guardrails.warnings
+  );
 }
 
 async function fetchAnalysis(
@@ -751,7 +899,13 @@ function Sources({
       </div>
       <div className="source-grid">
         {list.map((source, index) => (
-          <a href={source} target="_blank" rel="noreferrer" key={source}>
+          <a
+            href={source}
+            target="_blank"
+            rel="noreferrer"
+            key={source}
+            aria-label={`Open source ${index + 1}: ${sourceDomain(source)}`}
+          >
             <span className="source-index">{index + 1}</span>
             <span>
               <strong>{sourceDomain(source)}</strong>
@@ -958,10 +1112,10 @@ function EmptyState({
 function TrustStrip() {
   return (
     <div className="trust-strip" aria-label="Supported workflows">
-      <span>Sources</span>
-      <span>Live prices</span>
-      <span>Comparisons</span>
-      <span>History</span>
+      <span>Grounded sources</span>
+      <span>Live market data</span>
+      <span>Comparison-ready</span>
+      <span>Saved research</span>
     </div>
   );
 }
@@ -1408,6 +1562,86 @@ function ResultBody({
   );
 }
 
+function InvestmentSnapshot({
+  route,
+  payload,
+  score,
+  sourceCount,
+  canExport,
+  exporting,
+  onExportPdf,
+}: {
+  route: Route;
+  payload: Record<string, unknown>;
+  score: number;
+  sourceCount: number;
+  canExport: boolean;
+  exporting: boolean;
+  onExportPdf: () => void;
+}) {
+  const confidencePercent = Math.round(score * 100);
+  const hasConfidence = score > 0;
+  const snapshotItems = [
+    {
+      label: "View",
+      value: getSnapshotView(route, payload),
+    },
+    {
+      label: "Key reason",
+      value: getSnapshotReason(route, payload),
+      wide: true,
+    },
+    {
+      label: "Confidence",
+      value: hasConfidence
+        ? `${confidencePercent}% (${confidenceLabel(score)})`
+        : "Not provided",
+    },
+    {
+      label: "Main risk",
+      value: getSnapshotRisk(payload),
+      wide: true,
+    },
+    {
+      label: "Source count",
+      value: sourceCount
+        ? `${sourceCount} source link${sourceCount === 1 ? "" : "s"}`
+        : "Not provided",
+    },
+  ];
+
+  return (
+    <section className="investment-snapshot" aria-label="Investment snapshot">
+      <div className="investment-snapshot-header">
+        <div>
+          <span>Investment Snapshot</span>
+          <h3>{getPayloadTitle(route, payload)}</h3>
+        </div>
+        {canExport && (
+          <button
+            type="button"
+            onClick={onExportPdf}
+            disabled={exporting}
+          >
+            {exporting ? "Preparing PDF..." : "Export PDF"}
+          </button>
+        )}
+      </div>
+      <div className="investment-snapshot-grid">
+        {snapshotItems.map((item) => (
+          <article
+            className={`investment-snapshot-item ${item.wide ? "investment-snapshot-item-wide" : ""}`}
+            key={item.label}
+          >
+            <span>{item.label}</span>
+            <strong>{conciseSnapshotText(item.value)}</strong>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AssistantResultMessage({
   result,
   fallbackDetail,
@@ -1424,6 +1658,8 @@ function AssistantResultMessage({
   const sourceCount = asList(payload.sources_used || payload.sources).length;
   const sources = payload.sources_used || payload.sources;
   const isReport = mode === "report";
+  const confidencePercent = Math.round(score * 100);
+  const hasConfidence = score > 0;
   const canExport =
     isReport
     || (result.answer_detail || fallbackDetail) === "detailed";
@@ -1449,17 +1685,15 @@ function AssistantResultMessage({
       className={`result-shell assistant-message ${isReport ? "report-result" : ""}`}
       ref={exportRef}
     >
-      {canExport && (
-        <div className="result-actions">
-          <button
-            type="button"
-            onClick={handleExportPdf}
-            disabled={exporting}
-          >
-            {exporting ? "Preparing PDF..." : "Export PDF"}
-          </button>
-        </div>
-      )}
+      <InvestmentSnapshot
+        route={result.route}
+        payload={payload}
+        score={score}
+        sourceCount={sourceCount}
+        canExport={canExport}
+        exporting={exporting}
+        onExportPdf={handleExportPdf}
+      />
       {isReport && (
         <div className="report-cover">
           <span>FinIntel analyst report</span>
@@ -1496,12 +1730,26 @@ function AssistantResultMessage({
           </div>
         </section>
 
-        <section className="confidence-card">
+        <section
+          className="confidence-card"
+          aria-label={
+            hasConfidence
+              ? `Confidence score ${confidencePercent} percent`
+              : "Confidence score not provided"
+          }
+        >
           <span>Confidence</span>
-          <strong>{Math.round(score * 100)}%</strong>
-          <small>{confidenceLabel(score)}</small>
-          <div className="meter">
-            <div style={{ width: `${Math.round(score * 100)}%` }} />
+          <strong>{hasConfidence ? `${confidencePercent}%` : "N/A"}</strong>
+          <small>{hasConfidence ? confidenceLabel(score) : "Not provided"}</small>
+          <div
+            className="meter"
+            role="meter"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={hasConfidence ? confidencePercent : undefined}
+            aria-label="Confidence score"
+          >
+            <div style={{ width: `${hasConfidence ? confidencePercent : 0}%` }} />
           </div>
         </section>
       </div>
@@ -1573,7 +1821,25 @@ export default function App({
       : null
     : user;
 
+  const modeCopy = MODE_COPY[workMode];
+  const modeExamples = workMode === "report" ? REPORT_EXAMPLES : EXAMPLES;
+  const activeConversation = conversations.find(
+    (item) => item.conversation_id === currentConversationId
+  );
+  const progressValue = progressPercent(progressEvents);
+  const authStatus = externalAuth?.enabled
+    ? externalSignedIn
+      ? "Signed in with Clerk"
+      : "Sign in to save history"
+    : token
+      ? "Signed in"
+      : APP_API_KEY
+        ? "Development API key"
+        : "Sign in required";
+
   const resultRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const authDialogRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (messages.length || loading || error) {
@@ -1587,15 +1853,29 @@ export default function App({
   useEffect(() => {
     if (!authOpen) return;
 
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setAuthOpen(false);
       }
     }
 
+    const focusTimer = window.setTimeout(() => {
+      const target = authDialogRef.current?.querySelector<HTMLElement>(
+        "input, .clerk-actions button, .auth-card-modal button"
+      );
+      target?.focus();
+    }, 0);
+
     window.addEventListener("keydown", closeOnEscape);
 
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
   }, [authOpen]);
 
   useEffect(() => {
@@ -1667,6 +1947,11 @@ export default function App({
     setAuthOpen(false);
   }
 
+  function selectExample(example: string) {
+    setQuery(example);
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const trimmed = query.trim();
@@ -1680,6 +1965,7 @@ export default function App({
 
     if (!authToken && !APP_API_KEY) {
       setError("Please login or configure a development API key before asking FinIntel.");
+      setAuthOpen(true);
       return;
     }
 
@@ -1767,6 +2053,17 @@ export default function App({
           </div>
         </div>
 
+        <div className="sidebar-snapshot" aria-label="Session snapshot">
+          <div>
+            <span>Market</span>
+            <strong>India equities</strong>
+          </div>
+          <div>
+            <span>Depth</span>
+            <strong>{workMode === "report" ? "Detailed" : answerDetail}</strong>
+          </div>
+        </div>
+
         <button
           className="new-chat-button"
           type="button"
@@ -1777,7 +2074,7 @@ export default function App({
             setCurrentConversationId("");
           }}
         >
-          New research chat
+          + New research chat
         </button>
 
         <section className="sidebar-section">
@@ -1786,16 +2083,22 @@ export default function App({
             <button
               className={workMode === "chat" ? "active" : ""}
               type="button"
+              aria-label="Chat"
+              aria-pressed={workMode === "chat"}
               onClick={() => setWorkMode("chat")}
             >
-              Chat
+              <span>Chat</span>
+              <small>Focused answers</small>
             </button>
             <button
               className={workMode === "report" ? "active" : ""}
               type="button"
+              aria-label="Generate report"
+              aria-pressed={workMode === "report"}
               onClick={() => setWorkMode("report")}
             >
-              Generate report
+              <span>Generate report</span>
+              <small>Export-ready brief</small>
             </button>
           </div>
         </section>
@@ -1805,11 +2108,12 @@ export default function App({
             {workMode === "report" ? "Report ideas" : "Try asking"}
           </div>
           <div className="example-list">
-            {(workMode === "report" ? REPORT_EXAMPLES : EXAMPLES).map((example) => (
+            {modeExamples.map((example) => (
               <button
                 key={example}
                 type="button"
-                onClick={() => setQuery(example)}
+                onClick={() => selectExample(example)}
+                aria-label={`Use prompt: ${example}`}
               >
                 {example}
               </button>
@@ -1823,7 +2127,17 @@ export default function App({
             conversations.map((item) => (
               <button
                 key={item.conversation_id}
+                className={
+                  item.conversation_id === currentConversationId
+                    ? "active"
+                    : ""
+                }
                 type="button"
+                aria-current={
+                  item.conversation_id === currentConversationId
+                    ? "true"
+                    : undefined
+                }
                 onClick={async () => {
                   const authToken = await currentAuthToken();
                   const storedMessages = await fetchConversationMessages(
@@ -1842,59 +2156,98 @@ export default function App({
                   );
                 }}
               >
-                <span>Conversation</span>
+                <span>{formatHistoryDate(item.updated_at) || "Conversation"}</span>
                 <strong>{item.title}</strong>
               </button>
             ))
           ) : (
-            <p className="history-empty">
-              {displayedUser
-                ? "Your research chats will appear here."
-                : "Sign in to save your research history."}
-            </p>
+            <div className="history-empty">
+              <p>
+                {displayedUser
+                  ? "Your research chats will appear here."
+                  : "Sign in to save your research history."}
+              </p>
+              {!displayedUser && (
+                <button type="button" onClick={() => setAuthOpen(true)}>
+                  Open account
+                </button>
+              )}
+            </div>
           )}
         </section>
       </aside>
 
       <section className="chat-main">
         <header className="chat-topbar">
-          <div>
-            <p className="eyebrow">AI equity research, grounded with sources</p>
-            <strong className="topbar-title">
-              {workMode === "report" ? "Report generator" : "Research chat"}
-            </strong>
+          <div className="topbar-heading">
+            <p className="eyebrow">{modeCopy.eyebrow}</p>
+            <h1 className="topbar-title">{modeCopy.title}</h1>
+            {activeConversation && (
+              <span className="active-conversation-label">
+                {activeConversation.title}
+              </span>
+            )}
           </div>
-          <button
-            className="nav-auth-button"
-            type="button"
-            onClick={() => setAuthOpen(true)}
-          >
-            <span className="nav-auth-icon" aria-hidden="true" />
-            {displayedUser ? displayedUser.full_name : "Sign Up / Login"}
-            <span aria-hidden="true">v</span>
-          </button>
+          <div className="topbar-actions">
+            <div className="topbar-context" aria-label="Current session">
+              <span>{authStatus}</span>
+              <span>{currentConversationId ? "Saved chat" : "New session"}</span>
+            </div>
+            <button
+              className="nav-auth-button"
+              type="button"
+              onClick={() => setAuthOpen(true)}
+              aria-label={
+                displayedUser
+                  ? `Open account menu for ${displayedUser.full_name}`
+                  : "Open account sign in"
+              }
+            >
+              <span className="nav-auth-icon" aria-hidden="true" />
+              {displayedUser ? displayedUser.full_name : "Sign Up / Login"}
+              <span className="nav-auth-caret" aria-hidden="true" />
+            </button>
+          </div>
         </header>
 
-        <section className="chat-thread">
+        <section className="chat-thread" aria-live="polite" aria-busy={loading}>
           {messages.length === 0 && !loading && !error && (
             <section className="welcome-panel">
+              <span className="welcome-kicker">Market research workspace</span>
               <h2>How can I help with Indian markets today?</h2>
-              <p>
-                {workMode === "report"
-                  ? "Enter a company, comparison, sector, or market theme to generate a structured analyst-style report."
-                  : "Ask about prices, ratios, company fundamentals, comparisons, discovery screens, or news context."}
-              </p>
+              <p>{modeCopy.welcome}</p>
+              <div className="welcome-query-grid">
+                {modeExamples.slice(0, 3).map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => selectExample(example)}
+                  >
+                    <span>{workMode === "report" ? "Report" : "Prompt"}</span>
+                    <strong>{example}</strong>
+                  </button>
+                ))}
+              </div>
               <TrustStrip />
             </section>
           )}
 
           {messages.map((message) =>
             message.role === "user" ? (
-              <div className="message-row user-message" key={message.id}>
+              <div
+                className="message-row user-message"
+                key={message.id}
+                aria-label="Your message"
+              >
                 <div className="message-bubble">{message.content}</div>
               </div>
             ) : message.role === "assistant" ? (
-              <div className="message-row assistant-row" key={message.id}>
+              <div
+                className={`message-row assistant-row ${
+                  message.mode === "report" ? "assistant-row-wide" : ""
+                }`}
+                key={message.id}
+              >
                 <AssistantResultMessage
                   result={message.result}
                   fallbackDetail={answerDetail}
@@ -1923,6 +2276,8 @@ export default function App({
             aria-modal="true"
             role="dialog"
             aria-labelledby="auth-modal-title"
+            aria-describedby="auth-modal-copy"
+            ref={authDialogRef}
           >
             <button
               className="auth-modal-close"
@@ -1930,14 +2285,14 @@ export default function App({
               aria-label="Close account dialog"
               onClick={() => setAuthOpen(false)}
             >
-              x
+              <span aria-hidden="true">x</span>
             </button>
             <div className="auth-modal-copy">
               <span>FinIntel account</span>
               <h2 id="auth-modal-title">
                 {displayedUser ? "Account details" : "Sign in to continue"}
               </h2>
-              <p>
+              <p id="auth-modal-copy">
                 Save chat history and keep your research questions tied to your account.
               </p>
             </div>
@@ -1984,23 +2339,40 @@ export default function App({
                     </button>
                   </div>
                   {authMode === "register" && (
-                    <input
-                      value={fullName}
-                      onChange={(event) => setFullName(event.target.value)}
-                      placeholder="Full name"
-                    />
+                    <>
+                      <label className="sr-only" htmlFor="auth-full-name">
+                        Full name
+                      </label>
+                      <input
+                        id="auth-full-name"
+                        value={fullName}
+                        onChange={(event) => setFullName(event.target.value)}
+                        placeholder="Full name"
+                        autoComplete="name"
+                      />
+                    </>
                   )}
+                  <label className="sr-only" htmlFor="auth-email">
+                    Email
+                  </label>
                   <input
+                    id="auth-email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="Email"
                     type="email"
+                    autoComplete="email"
                   />
+                  <label className="sr-only" htmlFor="auth-password">
+                    Password
+                  </label>
                   <input
+                    id="auth-password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder="Password"
                     type="password"
+                    autoComplete={authMode === "login" ? "current-password" : "new-password"}
                   />
                   <button type="submit">
                     {authMode === "login" ? "Login" : "Create account"}
@@ -2013,22 +2385,33 @@ export default function App({
       )}
 
       <div ref={resultRef}>
-        {error && messages.length === 0 && <div className="error-banner">{error}</div>}
+        {error && messages.length === 0 && (
+          <div className="error-banner error-banner-action" role="alert">
+            <span>{error}</span>
+            {!displayedUser && (
+              <button type="button" onClick={() => setAuthOpen(true)}>
+                Open account
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {loading && (
-        <section className="loading-card progress-card">
+        <section className="loading-card progress-card" role="status">
           <div className="spinner" />
           <div>
             <strong>Analyzing market context</strong>
             <span>
               {progressEvents[progressEvents.length - 1]?.step
-                || (
-                  workMode === "report"
-                    ? "Routing, retrieving sources, and assembling a structured report."
-                    : "Routing, retrieving sources, and preparing a grounded answer."
-                )}
+                || modeCopy.loading}
             </span>
+            <div
+              className="progress-meter"
+              aria-hidden="true"
+            >
+              <span style={{ width: `${progressValue}%` }} />
+            </div>
             {progressEvents.length > 0 && (
               <ol className="progress-steps">
                 {progressEvents.map((progress) => (
@@ -2046,22 +2429,13 @@ export default function App({
 
         <form className="chat-composer" onSubmit={submit}>
           <div className="composer-toolbar">
-            <span>
-              {externalAuth?.enabled
-                ? externalSignedIn
-                  ? "Clerk account"
-                  : "Clerk login"
-                : token
-                  ? "Account mode"
-                  : APP_API_KEY
-                    ? "Dev key mode"
-                    : "Login required"}
-            </span>
+            <span id="composer-status">{authStatus}</span>
             <div className="composer-actions">
               <div className="mode-switch mode-switch-inline" aria-label="Work mode">
                 <button
                   className={workMode === "chat" ? "active" : ""}
                   type="button"
+                  aria-pressed={workMode === "chat"}
                   onClick={() => setWorkMode("chat")}
                 >
                   Chat
@@ -2069,6 +2443,7 @@ export default function App({
                 <button
                   className={workMode === "report" ? "active" : ""}
                   type="button"
+                  aria-pressed={workMode === "report"}
                   onClick={() => setWorkMode("report")}
                 >
                   Report
@@ -2078,6 +2453,7 @@ export default function App({
                 <button
                   className={workMode === "chat" && answerDetail === "brief" ? "active" : ""}
                   type="button"
+                  aria-pressed={workMode === "chat" && answerDetail === "brief"}
                   onClick={() => setAnswerDetail("brief")}
                   disabled={workMode === "report"}
                 >
@@ -2086,6 +2462,7 @@ export default function App({
                 <button
                   className={workMode === "report" || answerDetail === "detailed" ? "active" : ""}
                   type="button"
+                  aria-pressed={workMode === "report" || answerDetail === "detailed"}
                   onClick={() => setAnswerDetail("detailed")}
                 >
                   Detailed
@@ -2097,6 +2474,7 @@ export default function App({
           <div className="composer-input-row">
             <textarea
               id="query"
+              ref={composerInputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
@@ -2105,15 +2483,12 @@ export default function App({
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder={
-                workMode === "report"
-                  ? "Enter companies or a theme, e.g. HDFC Bank vs ICICI Bank or undervalued IT stocks"
-                  : "Ask about HDFC Bank, ROE, IT stocks, or latest market news"
-              }
+              placeholder={modeCopy.placeholder}
+              aria-describedby="composer-status"
               rows={2}
             />
             <button disabled={loading || !query.trim()} type="submit">
-              {loading ? "..." : workMode === "report" ? "Generate report" : "Analyze"}
+              {loading ? "Analyzing..." : modeCopy.submit}
             </button>
           </div>
         </form>

@@ -21,6 +21,7 @@ logs/
 # Cache
 .cache/
 .cache*/
+.video-tools/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -45,6 +46,9 @@ build/
 node_modules/
 *.tsbuildinfo
 frontend/.vite/
+frontend/.npm-cache/
+frontend/playwright-report/
+frontend/test-results/
 
 # Data / temp
 tmp/
