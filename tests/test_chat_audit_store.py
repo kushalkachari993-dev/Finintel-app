@@ -87,3 +87,74 @@ def test_chat_audit_store_records_conversation_messages(tmp_path):
     assert messages[0]["role"] == "user"
     assert messages[1]["role"] == "assistant"
     assert messages[1]["payload"]["query"] == "What is ROE?"
+
+
+def test_conversations_support_search_pin_rename_pagination_and_delete(tmp_path):
+    store = ChatAuditStore(
+        database_path=str(tmp_path / "audit.sqlite3")
+    )
+    roe_id = store.create_conversation(
+        principal_id="user:1",
+        title="ROE research"
+    )
+    bank_id = store.create_conversation(
+        principal_id="user:1",
+        title="Bank comparison"
+    )
+    other_user_id = store.create_conversation(
+        principal_id="user:2",
+        title="Private conversation"
+    )
+    store.add_message(
+        conversation_id=roe_id,
+        principal_id="user:1",
+        role="user",
+        content="What is ROE?"
+    )
+
+    assert store.rename_conversation(
+        principal_id="user:1",
+        conversation_id=roe_id,
+        title="Profitability research"
+    ) is True
+    assert store.set_conversation_pinned(
+        principal_id="user:1",
+        conversation_id=bank_id,
+        pinned=True
+    ) is True
+
+    first_page = store.list_conversations(
+        "user:1",
+        limit=1
+    )
+    second_page = store.list_conversations(
+        "user:1",
+        limit=1,
+        offset=1
+    )
+    search_results = store.list_conversations(
+        "user:1",
+        search="profit"
+    )
+
+    assert first_page[0]["conversation_id"] == bank_id
+    assert first_page[0]["pinned"] is True
+    assert second_page[0]["conversation_id"] == roe_id
+    assert search_results[0]["title"] == "Profitability research"
+    assert store.rename_conversation(
+        principal_id="user:1",
+        conversation_id=other_user_id,
+        title="Should fail"
+    ) is False
+    assert store.delete_conversation(
+        principal_id="user:1",
+        conversation_id=roe_id
+    ) is True
+    assert store.list_messages(
+        principal_id="user:1",
+        conversation_id=roe_id
+    ) == []
+    assert store.delete_conversation(
+        principal_id="user:1",
+        conversation_id=other_user_id
+    ) is False

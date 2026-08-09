@@ -174,6 +174,25 @@ class ChatAuditStore:
             ON chat_messages (conversation_id, created_at ASC, id ASC)
             """
         )
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(chat_conversations)"
+            ).fetchall()
+        }
+        if "pinned" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE chat_conversations
+                ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0
+                """
+            )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_conversations_principal_pinned_updated
+            ON chat_conversations (principal_id, pinned DESC, updated_at DESC)
+            """
+        )
 
     def record_chat(
         self,
@@ -406,6 +425,138 @@ class ChatAuditStore:
                 )
             )
 
+    def rename_conversation(
+        self,
+        *,
+        principal_id: str,
+        conversation_id: str,
+        title: str
+    ) -> bool:
+        clean_title = title.strip()[:120]
+        if not clean_title:
+            return False
+
+        with self.connect() as connection:
+            self.ensure_conversation_tables(
+                connection
+            )
+            existing = connection.execute(
+                """
+                SELECT 1
+                FROM chat_conversations
+                WHERE id = ? AND principal_id = ?
+                """,
+                (
+                    conversation_id,
+                    principal_id
+                )
+            ).fetchone()
+            if not existing:
+                return False
+
+            connection.execute(
+                """
+                UPDATE chat_conversations
+                SET title = ?, updated_at = ?
+                WHERE id = ? AND principal_id = ?
+                """,
+                (
+                    clean_title,
+                    int(time.time()),
+                    conversation_id,
+                    principal_id
+                )
+            )
+
+        return True
+
+    def set_conversation_pinned(
+        self,
+        *,
+        principal_id: str,
+        conversation_id: str,
+        pinned: bool
+    ) -> bool:
+        with self.connect() as connection:
+            self.ensure_conversation_tables(
+                connection
+            )
+            existing = connection.execute(
+                """
+                SELECT 1
+                FROM chat_conversations
+                WHERE id = ? AND principal_id = ?
+                """,
+                (
+                    conversation_id,
+                    principal_id
+                )
+            ).fetchone()
+            if not existing:
+                return False
+
+            connection.execute(
+                """
+                UPDATE chat_conversations
+                SET pinned = ?
+                WHERE id = ? AND principal_id = ?
+                """,
+                (
+                    1 if pinned else 0,
+                    conversation_id,
+                    principal_id
+                )
+            )
+
+        return True
+
+    def delete_conversation(
+        self,
+        *,
+        principal_id: str,
+        conversation_id: str
+    ) -> bool:
+        with self.connect() as connection:
+            self.ensure_conversation_tables(
+                connection
+            )
+            existing = connection.execute(
+                """
+                SELECT 1
+                FROM chat_conversations
+                WHERE id = ? AND principal_id = ?
+                """,
+                (
+                    conversation_id,
+                    principal_id
+                )
+            ).fetchone()
+            if not existing:
+                return False
+
+            connection.execute(
+                """
+                DELETE FROM chat_messages
+                WHERE conversation_id = ? AND principal_id = ?
+                """,
+                (
+                    conversation_id,
+                    principal_id
+                )
+            )
+            connection.execute(
+                """
+                DELETE FROM chat_conversations
+                WHERE id = ? AND principal_id = ?
+                """,
+                (
+                    conversation_id,
+                    principal_id
+                )
+            )
+
+        return True
+
     def add_message(
         self,
         *,
@@ -464,7 +615,9 @@ class ChatAuditStore:
     def list_conversations(
         self,
         principal_id: str,
-        limit: int = 25
+        limit: int = 25,
+        offset: int = 0,
+        search: str = ""
     ) -> list[dict]:
         bounded_limit = max(
             1,
@@ -473,35 +626,65 @@ class ChatAuditStore:
                 100
             )
         )
+        bounded_offset = max(
+            0,
+            int(offset)
+        )
+        clean_search = search.strip().lower()[:120]
 
         with self.connect() as connection:
             self.ensure_conversation_tables(
                 connection
             )
-            rows = connection.execute(
-                """
-                SELECT
-                    id,
-                    title,
-                    created_at,
-                    updated_at
-                FROM chat_conversations
-                WHERE principal_id = ?
-                ORDER BY updated_at DESC
-                LIMIT ?
-                """,
-                (
-                    principal_id,
-                    bounded_limit
-                )
-            ).fetchall()
+            if clean_search:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        id,
+                        title,
+                        created_at,
+                        updated_at,
+                        pinned
+                    FROM chat_conversations
+                    WHERE principal_id = ? AND LOWER(title) LIKE ?
+                    ORDER BY pinned DESC, updated_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (
+                        principal_id,
+                        f"%{clean_search}%",
+                        bounded_limit,
+                        bounded_offset
+                    )
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        id,
+                        title,
+                        created_at,
+                        updated_at,
+                        pinned
+                    FROM chat_conversations
+                    WHERE principal_id = ?
+                    ORDER BY pinned DESC, updated_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (
+                        principal_id,
+                        bounded_limit,
+                        bounded_offset
+                    )
+                ).fetchall()
 
         return [
             {
                 "conversation_id": row[0],
                 "title": row[1],
                 "created_at": row[2],
-                "updated_at": row[3]
+                "updated_at": row[3],
+                "pinned": bool(row[4])
             }
             for row in rows
         ]

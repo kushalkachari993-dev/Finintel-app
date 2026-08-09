@@ -423,6 +423,15 @@ class ChatRequest(BaseModel):
     )
 
 
+class ConversationUpdateRequest(BaseModel):
+
+    title: str | None = Field(
+        default=None,
+        max_length=120
+    )
+    pinned: bool | None = None
+
+
 FOLLOW_UP_TERMS = {
     "it",
     "this",
@@ -1035,6 +1044,8 @@ def chat_history(
 @app.get("/chat/conversations")
 def chat_conversations(
     limit: int = 25,
+    offset: int = 0,
+    search: str = "",
     principal=Security(get_authenticated_principal)
 ):
 
@@ -1048,12 +1059,31 @@ def chat_conversations(
             }
         )
 
+    page_size = max(
+        1,
+        min(
+            int(limit),
+            50
+        )
+    )
+    bounded_offset = max(
+        0,
+        int(offset)
+    )
+    conversations = chat_audit_store.list_conversations(
+        principal_id=principal["principal_id"],
+        limit=page_size + 1,
+        offset=bounded_offset,
+        search=search
+    )
+
     return {
         "success": True,
-        "conversations": chat_audit_store.list_conversations(
-            principal_id=principal["principal_id"],
-            limit=limit
-        )
+        "conversations": conversations[:page_size],
+        "has_more": len(conversations) > page_size,
+        "limit": page_size,
+        "offset": bounded_offset,
+        "search": search.strip()[:120]
     }
 
 
@@ -1093,6 +1123,116 @@ def chat_conversation_messages(
             principal_id=principal["principal_id"],
             conversation_id=conversation_id
         )
+    }
+
+
+@app.patch("/chat/conversations/{conversation_id}")
+def update_chat_conversation(
+    conversation_id: str,
+    update: ConversationUpdateRequest,
+    principal=Security(get_authenticated_principal)
+):
+
+    if not principal:
+
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "error": "Invalid or missing credentials."
+            }
+        )
+
+    principal_id = principal["principal_id"]
+    if not chat_audit_store.conversation_exists(
+        principal_id=principal_id,
+        conversation_id=conversation_id
+    ):
+
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "error": "Conversation not found."
+            }
+        )
+
+    if update.title is None and update.pinned is None:
+
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "Provide a title or pinned state."
+            }
+        )
+
+    clean_title = update.title.strip() if update.title is not None else None
+    if update.title is not None and not clean_title:
+
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "Conversation title cannot be empty."
+            }
+        )
+
+    if clean_title is not None:
+        chat_audit_store.rename_conversation(
+            principal_id=principal_id,
+            conversation_id=conversation_id,
+            title=clean_title
+        )
+
+    if update.pinned is not None:
+        chat_audit_store.set_conversation_pinned(
+            principal_id=principal_id,
+            conversation_id=conversation_id,
+            pinned=update.pinned
+        )
+
+    return {
+        "success": True,
+        "conversation_id": conversation_id,
+        "title": clean_title,
+        "pinned": update.pinned
+    }
+
+
+@app.delete("/chat/conversations/{conversation_id}")
+def delete_chat_conversation(
+    conversation_id: str,
+    principal=Security(get_authenticated_principal)
+):
+
+    if not principal:
+
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "error": "Invalid or missing credentials."
+            }
+        )
+
+    deleted = chat_audit_store.delete_conversation(
+        principal_id=principal["principal_id"],
+        conversation_id=conversation_id
+    )
+    if not deleted:
+
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "error": "Conversation not found."
+            }
+        )
+
+    return {
+        "success": True,
+        "conversation_id": conversation_id
     }
 
 # ---------------------------------------------------

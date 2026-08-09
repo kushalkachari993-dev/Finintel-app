@@ -69,7 +69,8 @@ def test_migration_runner_creates_core_schema(tmp_path):
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]
     assert {
         "schema_migrations",
@@ -100,12 +101,17 @@ def test_migration_runner_creates_core_schema(tmp_path):
             "chat_audit"
         )
     )
+    assert "pinned" in table_columns(
+        database_path,
+        "chat_conversations"
+    )
     assert migration_versions(database_path) == [
         "001",
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]
 
 
@@ -122,7 +128,8 @@ def test_migration_runner_is_idempotent(tmp_path):
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]
     assert runner.apply_pending() == []
     assert migration_versions(database_path) == [
@@ -130,7 +137,8 @@ def test_migration_runner_is_idempotent(tmp_path):
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]
 
 
@@ -152,7 +160,8 @@ def test_migration_runner_handles_precreated_audit_table(tmp_path):
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]
     assert {
         "response_json",
@@ -190,12 +199,14 @@ def test_migration_runner_handles_partially_upgraded_audit_table(tmp_path):
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]
     assert migration_versions(database_path) == [
         "001",
         "002",
         "003",
         "004",
-        "005"
+        "005",
+        "006"
     ]

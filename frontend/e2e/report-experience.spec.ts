@@ -119,6 +119,9 @@ test("renders a progressive report with a financial comparison matrix", async ({
   await expect(table.getByRole("columnheader", { name: /HDFC Bank/ })).toBeVisible();
   await expect(table.getByRole("columnheader", { name: /ICICI Bank/ })).toBeVisible();
   await expect(table.getByRole("rowheader", { name: "P/E Ratio" })).toBeVisible();
+  const peRow = table.getByRole("row").filter({ hasText: "P/E Ratio" });
+  await expect(peRow.getByRole("cell").nth(1)).toHaveClass(/comparison-leading-cell/);
+  await expect(peRow.getByText("Relative lead")).toBeVisible();
 
   const overview = page.locator("details").filter({ hasText: "Stock Overview" }).first();
   const context = page.locator("details").filter({ hasText: "Research Context" }).first();
@@ -148,7 +151,7 @@ test("renders a qualitative peer decision table from the comparison contract", a
         comparison_type: "Peer Comparison",
         companies_compared: ["HDFC Bank", "ICICI Bank"],
         summary: "Both banks are established private-sector franchises.",
-        winner_summary: "No universal winner; the choice depends on valuation and risk priorities.",
+        winner_summary: "ICICI Bank has the current edge on profitability and capital efficiency.",
         comparative_analysis: [
           "HDFC Bank offers scale and a broad deposit franchise.",
           "ICICI Bank currently shows strong profitability and capital efficiency.",
@@ -187,6 +190,67 @@ test("renders a qualitative peer decision table from the comparison contract", a
   await expect(peerTable.getByRole("rowheader", { name: "HDFC Bank" })).toBeVisible();
   await expect(peerTable.getByRole("cell", { name: "Scale; Deposit franchise" })).toBeVisible();
   await expect(peerTable.getByRole("cell", { name: "Credit-cycle normalization" })).toBeVisible();
+  const iciciRow = peerTable.getByRole("row").filter({ hasText: "ICICI Bank" });
+  await expect(iciciRow).toHaveClass(/comparison-leading-row/);
+  await expect(iciciRow.getByText("Model-indicated edge")).toBeVisible();
+});
+
+test("keeps a long multi-company report responsive", async ({ page }, testInfo) => {
+  const companies = Array.from({ length: 24 }, (_, index) => ({
+    company_name: `Company ${index + 1}`,
+    ticker: `COMP${index + 1}.NS`,
+    business_snapshot: `Business profile ${index + 1}`,
+    key_metrics: {
+      current_price: `INR ${900 + index * 11}`,
+      market_cap: `INR ${index + 1}.2T`,
+      pe_ratio: `${14 + index / 10}x`,
+      pb_ratio: `${2 + index / 20}x`,
+      roe: `${12 + index / 4}%`,
+      profit_margin: `${18 + index / 3}%`,
+      revenue_growth: `${8 + index / 5}%`,
+      debt_to_equity: `${0.2 + index / 100}`,
+    },
+    financial_quality: `Quality assessment ${index + 1}`,
+    valuation_view: `Valuation assessment ${index + 1}`,
+    growth_drivers: ["Execution", "Demand"],
+    risks: ["Valuation", "Competition"],
+    analyst_takeaway: `Takeaway ${index + 1}`,
+    sources: [`https://example.com/company-${index + 1}`],
+  }));
+  const largeResult = {
+    ...reportResult,
+    response: {
+      ...reportResult.response,
+      data: {
+        ...reportResult.response.data,
+        report_title: "Large-cap research universe",
+        companies,
+      },
+    },
+  };
+
+  await page.route("**/report/stream", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: `event: final\ndata: ${JSON.stringify(largeResult)}\n\n`,
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Work mode").getByRole("button", { name: /^Report$/ }).click();
+  await page.getByPlaceholder(/Enter companies or a theme/i).fill("Compare a large-cap universe");
+  const startedAt = Date.now();
+  await page.locator("form").getByRole("button", { name: /Generate report/i }).click();
+  await expect(page.getByRole("heading", { name: "Financial comparison" })).toBeVisible();
+  const renderDurationMs = Date.now() - startedAt;
+
+  await testInfo.attach("long-report-performance.json", {
+    body: JSON.stringify({ companyCount: companies.length, renderDurationMs }, null, 2),
+    contentType: "application/json",
+  });
+  expect(renderDurationMs).toBeLessThan(5_000);
+  expect(await page.locator(".comparison-table-metrics td").count()).toBeGreaterThan(150);
 });
 
 test.describe("mobile report", () => {

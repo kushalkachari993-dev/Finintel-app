@@ -1,4 +1,12 @@
-import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  ReactNode,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 const BACKEND_API_URL =
   import.meta.env.VITE_BACKEND_API_URL || "http://127.0.0.1:8000";
@@ -131,6 +139,12 @@ type ConversationSummary = {
   title: string;
   created_at: number;
   updated_at: number;
+  pinned?: boolean;
+};
+
+type ConversationPage = {
+  conversations: ConversationSummary[];
+  hasMore: boolean;
 };
 
 type StoredConversationMessage = {
@@ -480,6 +494,30 @@ function formatHistoryDate(value: number) {
   }).format(date);
 }
 
+function conversationDateGroup(value: number) {
+  const timestamp = value > 10_000_000_000 ? value : value * 1000;
+  const date = new Date(timestamp);
+  const today = new Date();
+  const startOfToday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  ).getTime();
+  const startOfConversationDay = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate()
+  ).getTime();
+  const ageInDays = Math.floor(
+    (startOfToday - startOfConversationDay) / 86_400_000
+  );
+
+  if (ageInDays <= 0) return "Today";
+  if (ageInDays === 1) return "Yesterday";
+  if (ageInDays < 7) return "Previous 7 days";
+  return "Older";
+}
+
 function getPayloadTitle(route: Route, payload: Record<string, unknown>) {
   if (route === "REPORT") return asString(payload.report_title) || "Analyst Report";
   if (route === "DISCOVERY") return "Discovery Ideas";
@@ -739,10 +777,29 @@ async function fetchAnalysisStream(
   throw new Error("Streaming response ended before a final answer.");
 }
 
-async function fetchConversations(token: string): Promise<ConversationSummary[]> {
-  if (!token) return [];
+async function fetchConversations(
+  token: string,
+  {
+    limit = 30,
+    offset = 0,
+    search = "",
+  }: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+  } = {}
+): Promise<ConversationPage> {
+  if (!token) return { conversations: [], hasMore: false };
 
-  const response = await fetch(`${BACKEND_API_URL}/chat/conversations?limit=20`, {
+  const parameters = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (search.trim()) {
+    parameters.set("search", search.trim());
+  }
+
+  const response = await fetch(`${BACKEND_API_URL}/chat/conversations?${parameters}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -750,10 +807,50 @@ async function fetchConversations(token: string): Promise<ConversationSummary[]>
   const body = await response.json().catch(() => null);
 
   if (!response.ok || !body?.success) {
-    return [];
+    return { conversations: [], hasMore: false };
   }
 
-  return body.conversations || [];
+  return {
+    conversations: body.conversations || [],
+    hasMore: Boolean(body.has_more),
+  };
+}
+
+async function updateConversation(
+  token: string,
+  conversationId: string,
+  update: { title?: string; pinned?: boolean }
+) {
+  const response = await fetch(`${BACKEND_API_URL}/chat/conversations/${conversationId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(update),
+  });
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok || !body?.success) {
+    throw new Error(body?.error || "Could not update conversation.");
+  }
+}
+
+async function deleteConversation(
+  token: string,
+  conversationId: string
+) {
+  const response = await fetch(`${BACKEND_API_URL}/chat/conversations/${conversationId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok || !body?.success) {
+    throw new Error(body?.error || "Could not delete conversation.");
+  }
 }
 
 async function fetchConversationMessages(
@@ -1161,6 +1258,7 @@ async function exportElementToPdf(
   const disclosures = Array.from(element.querySelectorAll("details"));
   const disclosureStates = disclosures.map((details) => details.open);
 
+  element.classList.add("pdf-exporting");
   disclosures.forEach((details) => {
     details.open = true;
   });
@@ -1184,6 +1282,7 @@ async function exportElementToPdf(
     disclosures.forEach((details, index) => {
       details.open = disclosureStates[index];
     });
+    element.classList.remove("pdf-exporting");
   }
   const image = canvas.toDataURL(
     "image/png"
@@ -1357,15 +1456,55 @@ function ReportDisclosure({
 }
 
 const COMPANY_METRICS = [
-  ["current_price", "Current Price"],
-  ["market_cap", "Market Cap"],
-  ["pe_ratio", "P/E Ratio"],
-  ["pb_ratio", "P/B Ratio"],
-  ["roe", "ROE"],
-  ["profit_margin", "Profit Margin"],
-  ["revenue_growth", "Revenue Growth"],
-  ["debt_to_equity", "Debt/Equity"],
+  ["current_price", "Current Price", "neutral"],
+  ["market_cap", "Market Cap", "neutral"],
+  ["pe_ratio", "P/E Ratio", "lower"],
+  ["pb_ratio", "P/B Ratio", "lower"],
+  ["roe", "ROE", "higher"],
+  ["profit_margin", "Profit Margin", "higher"],
+  ["revenue_growth", "Revenue Growth", "higher"],
+  ["debt_to_equity", "Debt/Equity", "lower"],
 ] as const;
+
+function comparableNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const text = asString(value).toLowerCase();
+  if (!text || text.includes("not ") || text.includes("n/a")) return null;
+
+  const match = text.replaceAll(",", "").match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function metricLeaders(
+  companies: Record<string, unknown>[],
+  key: string,
+  direction: "higher" | "lower" | "neutral"
+) {
+  if (direction === "neutral") return new Set<number>();
+
+  const values = companies.map((company, index) => ({
+    index,
+    value: comparableNumber(asRecord(company.key_metrics)[key]),
+  })).filter((item): item is { index: number; value: number } => item.value !== null);
+
+  if (values.length < 2) return new Set<number>();
+
+  const target = direction === "higher"
+    ? Math.max(...values.map((item) => item.value))
+    : Math.min(...values.map((item) => item.value));
+  const tolerance = Math.max(Math.abs(target) * 0.0001, 0.0001);
+  const leaders = values.filter((item) => Math.abs(item.value - target) <= tolerance);
+
+  return leaders.length === values.length
+    ? new Set<number>()
+    : new Set(leaders.map((item) => item.index));
+}
 
 function CompanyMetricComparison({
   companies,
@@ -1392,6 +1531,10 @@ function CompanyMetricComparison({
         </div>
         <small>{companies.length} companies</small>
       </div>
+      <div className="comparison-legend">
+        <span>Relative lead</span>
+        <p>Metric-level comparison only; it is not an overall investment recommendation.</p>
+      </div>
       <div
         className="comparison-table-scroll"
         role="region"
@@ -1411,21 +1554,30 @@ function CompanyMetricComparison({
             </tr>
           </thead>
           <tbody>
-            {metrics.map(([key, label]) => (
-              <tr key={key}>
-                <th scope="row">{label}</th>
-                {companies.map((company, index) => {
-                  const value = asRecord(company.key_metrics)[key];
-                  return (
-                    <td key={`${key}-${asString(company.ticker, String(index))}`}>
-                      {value === null || value === undefined || value === ""
-                        ? <span className="data-status-missing">Not available</span>
-                        : asString(value)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {metrics.map(([key, label, direction]) => {
+              const leaders = metricLeaders(companies, key, direction);
+
+              return (
+                <tr key={key}>
+                  <th scope="row">{label}</th>
+                  {companies.map((company, index) => {
+                    const value = asRecord(company.key_metrics)[key];
+                    const leads = leaders.has(index);
+                    return (
+                      <td
+                        className={leads ? "comparison-leading-cell" : ""}
+                        key={`${key}-${asString(company.ticker, String(index))}`}
+                      >
+                        {value === null || value === undefined || value === ""
+                          ? <span className="data-status-missing">Not available</span>
+                          : asString(value)}
+                        {leads && <span className="comparison-lead-label">Relative lead</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1449,6 +1601,18 @@ function PeerDecisionTable({ payload }: { payload: Record<string, unknown> }) {
   const analyses = asList(payload.comparative_analysis);
   const strengths = asRecord(payload.strengths);
   const risks = asRecord(payload.risks);
+  const winnerSummary = asString(payload.winner_summary);
+  const summaryLower = winnerSummary.toLowerCase();
+  const avoidsWinner = [
+    "no winner",
+    "no definitive",
+    "no universal",
+    "cannot be identified",
+  ].some((phrase) => summaryLower.includes(phrase));
+  const namedLeaders = avoidsWinner
+    ? []
+    : companies.filter((company) => summaryLower.includes(company.toLowerCase()));
+  const indicatedLeader = namedLeaders.length === 1 ? namedLeaders[0] : "";
 
   if (companies.length < 2) return null;
 
@@ -1460,6 +1624,10 @@ function PeerDecisionTable({ payload }: { payload: Record<string, unknown> }) {
           <h3 id="peer-comparison-title">Peer comparison</h3>
         </div>
         <small>{companies.length} companies</small>
+      </div>
+      <div className="comparison-legend">
+        <span>Model-indicated edge</span>
+        <p>Shown only when the response identifies one company; review the balanced view and risks.</p>
       </div>
       <div
         className="comparison-table-scroll"
@@ -1482,8 +1650,16 @@ function PeerDecisionTable({ payload }: { payload: Record<string, unknown> }) {
               const companyRisks = companyRecordItems(risks, company);
 
               return (
-                <tr key={company}>
-                  <th scope="row">{company}</th>
+                <tr
+                  className={company === indicatedLeader ? "comparison-leading-row" : ""}
+                  key={company}
+                >
+                  <th scope="row">
+                    {company}
+                    {company === indicatedLeader && (
+                      <span className="comparison-lead-label">Model-indicated edge</span>
+                    )}
+                  </th>
                   <td>{companyStrengths.slice(0, 2).join("; ") || "Not highlighted"}</td>
                   <td>{companyRisks.slice(0, 2).join("; ") || "Not highlighted"}</td>
                   <td>{analyses[index] || "No company-specific assessment provided."}</td>
@@ -2082,6 +2258,14 @@ export default function App({
     return stored ? (JSON.parse(stored) as AuthUser) : null;
   });
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMenuId, setHistoryMenuId] = useState("");
+  const [renamingConversationId, setRenamingConversationId] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState("");
+  const deferredHistorySearch = useDeferredValue(historySearch);
   const externalSignedIn = Boolean(
     externalAuth?.enabled && externalAuth.isSignedIn
   );
@@ -2099,6 +2283,25 @@ export default function App({
   const activeConversation = conversations.find(
     (item) => item.conversation_id === currentConversationId
   );
+  const conversationGroups = useMemo(() => {
+    const groups = new Map<string, ConversationSummary[]>();
+
+    conversations.forEach((conversation) => {
+      const label = conversation.pinned
+        ? "Pinned"
+        : conversationDateGroup(conversation.updated_at);
+      groups.set(label, [...(groups.get(label) || []), conversation]);
+    });
+
+    return ["Pinned", "Today", "Yesterday", "Previous 7 days", "Older"]
+      .map((label) => ({
+        label,
+        items: [...(groups.get(label) || [])].sort(
+          (left, right) => right.updated_at - left.updated_at
+        ),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [conversations]);
   const progressValue = progressPercent(progressEvents);
   const authStatus = externalAuth?.enabled
     ? externalSignedIn
@@ -2205,27 +2408,84 @@ export default function App({
   }, []);
 
   useEffect(() => {
-    if (externalAuth?.enabled) {
-      if (!externalAuth.isLoaded || !externalAuth.isSignedIn) {
-        setConversations([]);
+    if (!historyMenuId) return;
+
+    function closeHistoryMenu(event: KeyboardEvent | PointerEvent) {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+
+      const target = event.target;
+      if (
+        event instanceof PointerEvent
+        && target instanceof Element
+        && target.closest(".history-actions, .history-menu-button")
+      ) {
         return;
       }
 
-      externalAuth
-        .getToken()
-        .then((authToken) => fetchConversations(authToken || ""))
-        .then(setConversations)
-        .catch(() => setConversations([]));
-      return;
+      setHistoryMenuId("");
+      setDeleteConfirmationId("");
     }
 
-    if (!token) {
+    window.addEventListener("keydown", closeHistoryMenu);
+    window.addEventListener("pointerdown", closeHistoryMenu);
+
+    return () => {
+      window.removeEventListener("keydown", closeHistoryMenu);
+      window.removeEventListener("pointerdown", closeHistoryMenu);
+    };
+  }, [historyMenuId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+
+    if (
+      (externalAuth?.enabled && (!externalAuth.isLoaded || !externalAuth.isSignedIn))
+      || (!externalAuth?.enabled && !token)
+    ) {
       setConversations([]);
+      setHistoryHasMore(false);
       return;
     }
 
-    fetchConversations(token).then(setConversations).catch(() => setConversations([]));
-  }, [token, externalAuth?.enabled, externalAuth?.isLoaded, externalAuth?.isSignedIn]);
+    timer = window.setTimeout(async () => {
+      setHistoryLoading(true);
+
+      try {
+        const authToken = externalAuth?.enabled
+          ? (await externalAuth.getToken()) || ""
+          : token;
+        const page = await fetchConversations(authToken, {
+          search: deferredHistorySearch,
+        });
+
+        if (!cancelled) {
+          setConversations(page.conversations);
+          setHistoryHasMore(page.hasMore);
+        }
+      } catch {
+        if (!cancelled) {
+          setConversations([]);
+          setHistoryHasMore(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    }, deferredHistorySearch ? 180 : 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    token,
+    deferredHistorySearch,
+    externalAuth?.enabled,
+    externalAuth?.isLoaded,
+    externalAuth?.isSignedIn,
+  ]);
 
   async function currentAuthToken() {
     if (externalAuth?.enabled) {
@@ -2247,7 +2507,9 @@ export default function App({
       setUser(auth.user || null);
       localStorage.setItem("finintel_token", auth.access_token || "");
       localStorage.setItem("finintel_user", JSON.stringify(auth.user));
-      setConversations(await fetchConversations(auth.access_token || ""));
+      const page = await fetchConversations(auth.access_token || "");
+      setConversations(page.conversations);
+      setHistoryHasMore(page.hasMore);
       setPassword("");
       setAuthOpen(false);
     } catch (caught) {
@@ -2259,6 +2521,8 @@ export default function App({
     if (externalAuth?.enabled) {
       externalAuth.signOut().catch(() => undefined);
       setConversations([]);
+      setHistorySearch("");
+      setHistoryHasMore(false);
       setCurrentConversationId("");
       setAuthOpen(false);
       return;
@@ -2269,6 +2533,8 @@ export default function App({
     localStorage.removeItem("finintel_token");
     localStorage.removeItem("finintel_user");
     setConversations([]);
+    setHistorySearch("");
+    setHistoryHasMore(false);
     setCurrentConversationId("");
     setAuthOpen(false);
   }
@@ -2277,6 +2543,106 @@ export default function App({
     setQuery(example);
     setMobileNavOpen(false);
     requestAnimationFrame(() => composerInputRef.current?.focus());
+  }
+
+  async function openConversation(item: ConversationSummary) {
+    const authToken = await currentAuthToken();
+    const storedMessages = await fetchConversationMessages(
+      authToken,
+      item.conversation_id
+    );
+    setQuery("");
+    setError("");
+    setCurrentConversationId(item.conversation_id);
+    setMessages(messagesFromStoredConversation(storedMessages));
+    setHistoryMenuId("");
+    setMobileNavOpen(false);
+  }
+
+  async function loadMoreConversations() {
+    const authToken = await currentAuthToken();
+    if (!authToken || historyLoading) return;
+
+    setHistoryLoading(true);
+
+    try {
+      const page = await fetchConversations(authToken, {
+        offset: conversations.length,
+        search: deferredHistorySearch,
+      });
+      setConversations((current) => {
+        const existing = new Set(current.map((item) => item.conversation_id));
+        return [
+          ...current,
+          ...page.conversations.filter((item) => !existing.has(item.conversation_id)),
+        ];
+      });
+      setHistoryHasMore(page.hasMore);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load more conversations.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function saveConversationRename(conversationId: string) {
+    const cleanTitle = renameDraft.trim();
+    if (!cleanTitle) return;
+
+    try {
+      const authToken = await currentAuthToken();
+      await updateConversation(authToken, conversationId, {
+        title: cleanTitle,
+      });
+      setConversations((current) => current.map((item) =>
+        item.conversation_id === conversationId
+          ? { ...item, title: cleanTitle, updated_at: Math.floor(Date.now() / 1000) }
+          : item
+      ));
+      setRenamingConversationId("");
+      setHistoryMenuId("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not rename conversation.");
+    }
+  }
+
+  async function toggleConversationPin(item: ConversationSummary) {
+    try {
+      const authToken = await currentAuthToken();
+      const pinned = !item.pinned;
+      await updateConversation(authToken, item.conversation_id, { pinned });
+      setConversations((current) => current.map((conversation) =>
+        conversation.conversation_id === item.conversation_id
+          ? { ...conversation, pinned }
+          : conversation
+      ));
+      setHistoryMenuId("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not organize conversation.");
+    }
+  }
+
+  async function removeConversation(item: ConversationSummary) {
+    if (deleteConfirmationId !== item.conversation_id) {
+      setDeleteConfirmationId(item.conversation_id);
+      return;
+    }
+
+    try {
+      const authToken = await currentAuthToken();
+      await deleteConversation(authToken, item.conversation_id);
+      setConversations((current) => current.filter(
+        (conversation) => conversation.conversation_id !== item.conversation_id
+      ));
+      if (currentConversationId === item.conversation_id) {
+        setCurrentConversationId("");
+        setMessages([]);
+      }
+      setDeleteConfirmationId("");
+      setHistoryMenuId("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete conversation.");
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -2346,7 +2712,11 @@ export default function App({
         },
       ]);
       if (authToken) {
-        setConversations(await fetchConversations(authToken));
+        const page = await fetchConversations(authToken, {
+          search: deferredHistorySearch,
+        });
+        setConversations(page.conversations);
+        setHistoryHasMore(page.hasMore);
       }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unexpected error.";
@@ -2483,50 +2853,155 @@ export default function App({
         )}
 
         <section className="sidebar-section sidebar-history">
-          <div className="sidebar-title">Recent chats</div>
+          <div className="sidebar-title-row">
+            <div className="sidebar-title">Research history</div>
+            {displayedUser && <span>{conversations.length}</span>}
+          </div>
+          {displayedUser && (
+            <label className="history-search">
+              <span className="sr-only">Search conversations</span>
+              <input
+                type="search"
+                value={historySearch}
+                onChange={(event) => setHistorySearch(event.target.value)}
+                placeholder="Search research"
+                autoComplete="off"
+              />
+            </label>
+          )}
           {displayedUser && conversations.length > 0 ? (
-            conversations.map((item) => (
-              <button
-                key={item.conversation_id}
-                className={
-                  item.conversation_id === currentConversationId
-                    ? "active"
-                    : ""
-                }
-                type="button"
-                aria-current={
-                  item.conversation_id === currentConversationId
-                    ? "true"
-                    : undefined
-                }
-                onClick={async () => {
-                  const authToken = await currentAuthToken();
-                  const storedMessages = await fetchConversationMessages(
-                    authToken,
-                    item.conversation_id
-                  );
-                  setQuery("");
-                  setError("");
-                  setCurrentConversationId(
-                    item.conversation_id
-                  );
-                  setMessages(
-                    messagesFromStoredConversation(
-                      storedMessages
-                    )
-                  );
-                  setMobileNavOpen(false);
-                }}
-              >
-                <span>{formatHistoryDate(item.updated_at) || "Conversation"}</span>
-                <strong>{item.title}</strong>
-              </button>
-            ))
+            <>
+              {conversationGroups.map((group) => (
+                <div className="history-group" key={group.label}>
+                  <div className="history-group-label">{group.label}</div>
+                  {group.items.map((item) => (
+                    <article
+                      className={`history-item ${item.conversation_id === currentConversationId ? "active" : ""}`}
+                      key={item.conversation_id}
+                    >
+                      {renamingConversationId === item.conversation_id ? (
+                        <form
+                          className="history-rename-form"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            saveConversationRename(item.conversation_id);
+                          }}
+                        >
+                          <input
+                            value={renameDraft}
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            aria-label="Conversation title"
+                            maxLength={120}
+                            autoFocus
+                          />
+                          <div>
+                            <button type="submit" disabled={!renameDraft.trim()}>
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRenamingConversationId("")}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <button
+                            className="history-open-button"
+                            type="button"
+                            aria-current={
+                              item.conversation_id === currentConversationId
+                                ? "true"
+                                : undefined
+                            }
+                            onClick={() => openConversation(item)}
+                          >
+                            <span>{formatHistoryDate(item.updated_at) || "Conversation"}</span>
+                            <strong>{item.title}</strong>
+                          </button>
+                          <button
+                            className="history-menu-button"
+                            type="button"
+                            aria-label={`Actions for ${item.title}`}
+                            aria-expanded={historyMenuId === item.conversation_id}
+                            onClick={() => {
+                              setHistoryMenuId((current) =>
+                                current === item.conversation_id ? "" : item.conversation_id
+                              );
+                              setDeleteConfirmationId("");
+                            }}
+                          >
+                            <span aria-hidden="true">...</span>
+                          </button>
+                          {historyMenuId === item.conversation_id && (
+                            <div className="history-actions" role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => toggleConversationPin(item)}
+                              >
+                                {item.pinned ? "Unpin" : "Pin to top"}
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setRenameDraft(item.title);
+                                  setRenamingConversationId(item.conversation_id);
+                                  setHistoryMenuId("");
+                                }}
+                              >
+                                Rename
+                              </button>
+                              <button
+                                className="history-delete-button"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => removeConversation(item)}
+                              >
+                                {deleteConfirmationId === item.conversation_id
+                                  ? "Confirm delete"
+                                  : "Delete"}
+                              </button>
+                              {deleteConfirmationId === item.conversation_id && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => setDeleteConfirmationId("")}
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ))}
+              {historyHasMore && (
+                <button
+                  className="history-load-more"
+                  type="button"
+                  onClick={loadMoreConversations}
+                  disabled={historyLoading}
+                >
+                  {historyLoading ? "Loading..." : "Load more"}
+                </button>
+              )}
+            </>
           ) : (
             <div className="history-empty">
               <p>
                 {displayedUser
-                  ? "Your research chats will appear here."
+                  ? historyLoading
+                    ? "Loading research history..."
+                    : historySearch
+                      ? "No research matches this search."
+                      : "Your research chats will appear here."
                   : "Sign in to save your research history."}
               </p>
               {!displayedUser && (

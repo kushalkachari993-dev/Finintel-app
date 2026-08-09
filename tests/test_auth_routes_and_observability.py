@@ -85,6 +85,79 @@ def test_register_login_and_me(monkeypatch, tmp_path):
     assert profile.json()["user"]["email_verified"] is False
 
 
+def test_conversation_routes_support_organization_and_pagination(monkeypatch, tmp_path):
+    configure_auth_routes(
+        monkeypatch,
+        tmp_path
+    )
+
+    with TestClient(
+        main.app
+    ) as client:
+        registered = client.post(
+            "/auth/register",
+            json={
+                "email": "history@example.com",
+                "password": "strong-password",
+                "full_name": "History User"
+            }
+        )
+        token = registered.json()["access_token"]
+        principal_id = f'user:{registered.json()["user"]["user_id"]}'
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+
+        first_id = main.chat_audit_store.create_conversation(
+            principal_id=principal_id,
+            title="HDFC Bank review"
+        )
+        main.chat_audit_store.create_conversation(
+            principal_id=principal_id,
+            title="ICICI Bank review"
+        )
+
+        searched = client.get(
+            "/chat/conversations?limit=1&search=HDFC",
+            headers=headers
+        )
+        renamed = client.patch(
+            f"/chat/conversations/{first_id}",
+            headers=headers,
+            json={
+                "title": "HDFC Bank investment case",
+                "pinned": True
+            }
+        )
+        organized = client.get(
+            "/chat/conversations?limit=1",
+            headers=headers
+        )
+        deleted = client.delete(
+            f"/chat/conversations/{first_id}",
+            headers=headers
+        )
+        missing = client.get(
+            f"/chat/conversations/{first_id}",
+            headers=headers
+        )
+
+    assert searched.status_code == 200
+    assert searched.json()["conversations"][0]["conversation_id"] == first_id
+    assert searched.json()["has_more"] is False
+    assert renamed.status_code == 200
+    assert organized.json()["has_more"] is True
+    assert organized.json()["conversations"][0] == {
+        "conversation_id": first_id,
+        "title": "HDFC Bank investment case",
+        "created_at": organized.json()["conversations"][0]["created_at"],
+        "updated_at": organized.json()["conversations"][0]["updated_at"],
+        "pinned": True
+    }
+    assert deleted.status_code == 200
+    assert missing.status_code == 404
+
+
 def test_verify_email_route(monkeypatch, tmp_path):
     configure_auth_routes(
         monkeypatch,
