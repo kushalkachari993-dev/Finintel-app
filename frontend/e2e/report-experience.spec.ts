@@ -115,13 +115,20 @@ async function loadMockReport(page: Page) {
 test("renders a progressive report with a financial comparison matrix", async ({ page }) => {
   await loadMockReport(page);
 
+  const snapshot = page.getByLabel("Investment snapshot");
+  await expect(snapshot.getByText("Research signal")).toBeVisible();
+  await expect(snapshot.getByText("Balanced", { exact: true })).toBeVisible();
+  await expect(snapshot.getByText("Evidence quality")).toBeVisible();
+  await expect(snapshot.getByText("Supported evidence")).toBeVisible();
+
   const table = page.getByRole("table");
   await expect(table.getByRole("columnheader", { name: /HDFC Bank/ })).toBeVisible();
   await expect(table.getByRole("columnheader", { name: /ICICI Bank/ })).toBeVisible();
   await expect(table.getByRole("rowheader", { name: "P/E Ratio" })).toBeVisible();
   const peRow = table.getByRole("row").filter({ hasText: "P/E Ratio" });
   await expect(peRow.getByRole("cell").nth(1)).toHaveClass(/comparison-leading-cell/);
-  await expect(peRow.getByText("Relative lead")).toBeVisible();
+  await expect(peRow.getByText("Metric leader")).toBeVisible();
+  await expect(page.getByText("FinIntel edge map")).toBeVisible();
 
   const overview = page.locator("details").filter({ hasText: "Stock Overview" }).first();
   const context = page.locator("details").filter({ hasText: "Research Context" }).first();
@@ -182,7 +189,7 @@ test("renders a qualitative peer decision table from the comparison contract", a
 
   await page.goto("/");
   await page.getByPlaceholder(/Ask about HDFC Bank/i).fill(comparisonResult.query);
-  await page.locator("form").getByRole("button", { name: "Analyze" }).click();
+  await page.locator("form").getByRole("button", { name: "Run research" }).click();
 
   const peerTable = page.getByRole("region", {
     name: "Scrollable peer comparison table",

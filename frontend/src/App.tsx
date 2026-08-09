@@ -90,7 +90,7 @@ const MODE_COPY: Record<
       "Ask about prices, ratios, company fundamentals, comparisons, discovery screens, or news context.",
     placeholder: "Ask about HDFC Bank, ROE, IT stocks, or latest market news",
     loading: "Routing, retrieving sources, and preparing a grounded answer.",
-    submit: "Analyze",
+    submit: "Run research",
   },
   report: {
     eyebrow: "Structured research briefs with export",
@@ -464,6 +464,12 @@ function confidenceLabel(score: number) {
   return "Low";
 }
 
+type ResearchSignal = {
+  label: string;
+  detail: string;
+  tone: "constructive" | "balanced" | "cautious" | "limited";
+};
+
 function progressPercent(events: ProgressEvent[]) {
   const latest = events[events.length - 1];
 
@@ -626,6 +632,71 @@ function getSnapshotRisk(payload: Record<string, unknown>) {
     companyRisks,
     guardrails.warnings
   );
+}
+
+function getResearchSignal(
+  route: Route,
+  payload: Record<string, unknown>,
+  score: number,
+  sourceCount: number
+): ResearchSignal {
+  if (!sourceCount || (score > 0 && score < 0.5)) {
+    return {
+      label: "Evidence limited",
+      detail: "Review source coverage before relying on this result.",
+      tone: "limited",
+    };
+  }
+
+  const signalText = [
+    getSnapshotView(route, payload),
+    getRouteSummary(route, payload),
+    payload.valuation_outlook,
+    payload.research_view,
+    payload.winner_summary,
+  ].map((value) => asString(value).toLowerCase()).join(" ");
+  const cautiousTerms = [
+    "bearish",
+    "cautious",
+    "negative",
+    "overvalued",
+    "deteriorating",
+    "avoid",
+    "material risk",
+  ];
+  const constructiveTerms = [
+    "bullish",
+    "constructive",
+    "positive",
+    "undervalued",
+    "outperform",
+    "favorable",
+    "strong opportunity",
+  ];
+
+  if (cautiousTerms.some((term) => signalText.includes(term))) {
+    return {
+      label: "Cautious",
+      detail: "The research view emphasizes downside or valuation risk.",
+      tone: "cautious",
+    };
+  }
+
+  if (constructiveTerms.some((term) => signalText.includes(term))) {
+    return {
+      label: "Constructive",
+      detail: "The research view identifies favorable evidence.",
+      tone: "constructive",
+    };
+  }
+
+  return {
+    label: route === "EDUCATIONAL" ? "Reference" : "Balanced",
+    detail: route === "EDUCATIONAL"
+      ? "Educational context, not a directional investment view."
+      : "No single directional conclusion dominates the evidence.",
+    tone: "balanced",
+  };
 }
 
 async function fetchAnalysis(
@@ -1003,8 +1074,11 @@ function Sources({
   return (
     <section className={`section source-section ${compact ? "source-section-compact" : ""}`}>
       <div className="section-heading-row">
-        <h3>{compact ? "Verified sources" : "Sources"}</h3>
-        <span>{list.length} link{list.length === 1 ? "" : "s"}</span>
+        <div>
+          <small>Evidence register</small>
+          <h3>{compact ? "Linked evidence" : "Research sources"}</h3>
+        </div>
+        <span>{list.length} source{list.length === 1 ? "" : "s"}</span>
       </div>
       <div className="source-grid">
         {list.map((source, index) => (
@@ -1061,7 +1135,8 @@ function GuardrailNotice({ guardrails }: { guardrails: unknown }) {
   return (
     <section className="guardrail-notice">
       <div>
-        <strong>Financial safety checks</strong>
+        <small>Evidence protocol</small>
+        <strong>Research quality checks</strong>
         <span>
           Sources: {asString(sourceQuality.label, "Not available")}
           {sourceQuality.source_count !== undefined
@@ -1506,6 +1581,61 @@ function metricLeaders(
     : new Set(leaders.map((item) => item.index));
 }
 
+function ComparisonEdgeMap({
+  companies,
+  metrics,
+}: {
+  companies: Record<string, unknown>[];
+  metrics: typeof COMPANY_METRICS[number][];
+}) {
+  const scores = companies.map(() => 0);
+  let scoredMetrics = 0;
+
+  metrics.forEach(([key, , direction]) => {
+    const leaders = metricLeaders(companies, key, direction);
+    if (!leaders.size) return;
+
+    scoredMetrics += 1;
+    leaders.forEach((index) => {
+      scores[index] += 1;
+    });
+  });
+
+  if (!scoredMetrics) return null;
+
+  return (
+    <div className="comparison-edge-map" aria-label="Metric leadership summary">
+      <div className="comparison-edge-heading">
+        <div>
+          <span>FinIntel edge map</span>
+          <strong>Metric leadership</strong>
+        </div>
+        <small>{scoredMetrics} comparable metric{scoredMetrics === 1 ? "" : "s"}</small>
+      </div>
+      <div className="comparison-edge-rows">
+        {companies.map((company, index) => {
+          const companyName = asString(company.company_name, `Company ${index + 1}`);
+          const score = scores[index];
+          const width = score > 0
+            ? Math.max(4, (score / scoredMetrics) * 100)
+            : 0;
+
+          return (
+            <div className="comparison-edge-row" key={`${companyName}-${index}`}>
+              <span>{companyName}</span>
+              <div aria-hidden="true">
+                <i style={{ width: `${width}%` }} />
+              </div>
+              <strong>{score} lead{score === 1 ? "" : "s"}</strong>
+            </div>
+          );
+        })}
+      </div>
+      <p>Directional metric count only. It does not represent an overall recommendation.</p>
+    </div>
+  );
+}
+
 function CompanyMetricComparison({
   companies,
 }: {
@@ -1532,9 +1662,10 @@ function CompanyMetricComparison({
         <small>{companies.length} companies</small>
       </div>
       <div className="comparison-legend">
-        <span>Relative lead</span>
+        <span>Metric leader</span>
         <p>Metric-level comparison only; it is not an overall investment recommendation.</p>
       </div>
+      <ComparisonEdgeMap companies={companies} metrics={metrics} />
       <div
         className="comparison-table-scroll"
         role="region"
@@ -1571,7 +1702,7 @@ function CompanyMetricComparison({
                         {value === null || value === undefined || value === ""
                           ? <span className="data-status-missing">Not available</span>
                           : asString(value)}
-                        {leads && <span className="comparison-lead-label">Relative lead</span>}
+                        {leads && <span className="comparison-lead-label">Metric leader</span>}
                       </td>
                     );
                   })}
@@ -1641,7 +1772,7 @@ function PeerDecisionTable({ payload }: { payload: Record<string, unknown> }) {
               <th scope="col">Company</th>
               <th scope="col">Key strength</th>
               <th scope="col">Main risk</th>
-              <th scope="col">Current read</th>
+              <th scope="col">Analyst view</th>
             </tr>
           </thead>
           <tbody>
@@ -2023,6 +2154,19 @@ function InvestmentSnapshot({
 }) {
   const confidencePercent = Math.round(score * 100);
   const hasConfidence = score > 0;
+  const signal = getResearchSignal(route, payload, score, sourceCount);
+  const guardrails = asRecord(payload.guardrails);
+  const sourceQuality = asRecord(guardrails.source_quality);
+  const dataQuality = asRecord(guardrails.data_quality);
+  const declaredSourceQuality = asString(sourceQuality.label).toLowerCase();
+  const evidenceIsSupported = ["strong", "high", "good", "verified"].some(
+    (label) => declaredSourceQuality.includes(label)
+  ) || (sourceCount >= 2 && score >= 0.7);
+  const evidenceLabel = sourceCount > 0 && evidenceIsSupported
+    ? "Supported evidence"
+    : sourceCount > 0
+      ? "Partial coverage"
+      : "Evidence unavailable";
   const snapshotItems = [
     {
       key: "view",
@@ -2061,18 +2205,26 @@ function InvestmentSnapshot({
     <section className="investment-snapshot" aria-label="Investment snapshot">
       <div className="investment-snapshot-header">
         <div>
-          <span>Investment Snapshot</span>
+          <span>FinIntel / Investment Snapshot</span>
           <h3>{getPayloadTitle(route, payload)}</h3>
         </div>
-        {canExport && (
-          <button
-            type="button"
-            onClick={onExportPdf}
-            disabled={exporting}
-          >
-            {exporting ? "Preparing PDF..." : "Export PDF"}
-          </button>
-        )}
+        <div className="investment-snapshot-actions">
+          <div className={`research-signal research-signal-${signal.tone}`}>
+            <span>Research signal</span>
+            <strong>{signal.label}</strong>
+            <small>{signal.detail}</small>
+          </div>
+          {canExport && (
+            <button
+              type="button"
+              onClick={onExportPdf}
+              disabled={exporting}
+            >
+              <span aria-hidden="true">↓</span>
+              {exporting ? "Preparing PDF..." : "Export PDF"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="investment-snapshot-grid">
         {snapshotItems.map((item) => (
@@ -2084,6 +2236,19 @@ function InvestmentSnapshot({
             <strong>{conciseSnapshotText(item.value)}</strong>
           </article>
         ))}
+      </div>
+      <div className={`evidence-stamp evidence-stamp-${sourceCount ? "linked" : "limited"}`}>
+        <div className="evidence-stamp-mark" aria-hidden="true">FI</div>
+        <div>
+          <span>Evidence quality</span>
+          <strong>{evidenceLabel}</strong>
+          <small>
+            {sourceCount ? `${sourceCount} linked source${sourceCount === 1 ? "" : "s"}` : "No linked sources"}
+            {hasConfidence ? ` · ${confidencePercent}% confidence` : " · Confidence unavailable"}
+            {dataQuality.label ? ` · ${asString(dataQuality.label)} data` : ""}
+          </small>
+        </div>
+        <em>{asString(sourceQuality.label, sourceCount ? "Linked" : "Limited")}</em>
       </div>
     </section>
   );
@@ -2195,7 +2360,7 @@ function AssistantResultMessage({
         </p>
         <div className="result-meta">
           <StatPill label="Route" value={routeLabel(result.route)} />
-          <StatPill label="Verified sources" value={sourceCount ? sourceCount : "Not provided"} />
+          <StatPill label="Linked evidence" value={sourceCount ? sourceCount : "Evidence unavailable"} />
           <StatPill label="Routing confidence" value={formatPercent(result.routing?.confidence)} />
         </div>
       </section>
@@ -2757,7 +2922,9 @@ export default function App({
       >
         <div className="sidebar-header">
           <div className="brand">
-            <img src="/finintel-logo.png" alt="FinIntel AI logo" />
+            <span className="brand-mark">
+              <img src="/finintel-logo.png" alt="FinIntel AI logo" />
+            </span>
             <div>
               <strong>FinIntel AI</strong>
               <span>Indian Market Intelligence</span>
@@ -3258,9 +3425,15 @@ export default function App({
 
       {loading && (
         <section className="loading-card progress-card" role="status">
-          <div className="spinner" />
+          <div className="research-loader" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
           <div>
-            <strong>Analyzing market context</strong>
+            <small>FinIntel research desk</small>
+            <strong>Building the evidence chain</strong>
             <span>
               {progressEvents[progressEvents.length - 1]?.step
                 || modeCopy.loading}
