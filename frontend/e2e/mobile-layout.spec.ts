@@ -13,8 +13,19 @@ test.describe("mobile layout", () => {
         name: /How can I help with Indian markets today/i,
       })
     ).toBeVisible();
-    await expect(page.locator(".chat-sidebar")).toBeVisible();
+    await expect(page.locator(".chat-sidebar")).toBeHidden();
     await expect(page.locator(".chat-main")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Open research navigation" })
+    ).toBeVisible();
+    await expect(page.locator(".chat-composer")).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: "Use prompt: What is ROE?" })
+    ).toHaveCount(0);
+
+    const composerHeight = await page
+      .locator(".chat-composer")
+      .evaluate((element) => element.getBoundingClientRect().height);
 
     const horizontalOverflow = await page.evaluate(() => {
       const root = document.documentElement;
@@ -22,6 +33,35 @@ test.describe("mobile layout", () => {
     });
 
     expect(horizontalOverflow).toBeLessThanOrEqual(1);
+    expect(composerHeight).toBeLessThan(170);
+  });
+
+  test("opens and closes the research navigation drawer", async ({ page }) => {
+    await page.goto("/");
+
+    const sidebar = page.locator(".chat-sidebar");
+    const menuButton = page.getByRole("button", {
+      name: "Open research navigation",
+    });
+
+    await menuButton.click();
+
+    await expect(sidebar).toBeVisible();
+    await expect(page.locator(".mobile-nav-backdrop")).toBeVisible();
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+    await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+    const closeButton = page.getByRole("button", {
+      name: "Close research navigation",
+    }).last();
+
+    await expect(closeButton).toBeFocused();
+    await closeButton.click();
+
+    await expect(sidebar).toBeHidden();
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+    await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    await expect(menuButton).toBeFocused();
   });
 
   test("keeps compact source cards readable", async ({ page }) => {

@@ -206,6 +206,14 @@ function asRecord(value: unknown) {
     : {};
 }
 
+function asRecordList(value: unknown) {
+  return Array.isArray(value)
+    ? value
+      .map((item) => asRecord(item))
+      .filter((item) => Object.keys(item).length > 0)
+    : [];
+}
+
 function routeLabel(route: Route) {
   return ROUTE_LABELS[route] || route.replaceAll("_", " ");
 }
@@ -1023,12 +1031,13 @@ function AnalystReportTemplate({
   }
 
   return (
-    <section className="analyst-template">
-      <div className="section-heading-row">
-        <h3>Analyst Report</h3>
-        <span>Structured detailed view</span>
-      </div>
-
+    <ReportDisclosure
+      number="A1"
+      title="Analyst Report"
+      description="Structured detailed view"
+      defaultOpen
+      className="analyst-template"
+    >
       <div className="analyst-grid">
         {executiveSummary && (
           <article className="analyst-card analyst-card-wide">
@@ -1094,7 +1103,7 @@ function AnalystReportTemplate({
           </p>
         </article>
       </div>
-    </section>
+    </ReportDisclosure>
   );
 }
 
@@ -1117,7 +1126,7 @@ function TrustStrip() {
   return (
     <div className="trust-strip" aria-label="Supported workflows">
       <span>Grounded sources</span>
-      <span>Live market data</span>
+      <span>Freshness labeled</span>
       <span>Comparison-ready</span>
       <span>Saved research</span>
     </div>
@@ -1149,14 +1158,33 @@ async function exportElementToPdf(
     import("jspdf")
   ]);
 
-  const canvas = await html2canvas(
-    element,
-    {
-      backgroundColor: "#f6f8f7",
-      scale: 2,
-      useCORS: true
-    }
-  );
+  const disclosures = Array.from(element.querySelectorAll("details"));
+  const disclosureStates = disclosures.map((details) => details.open);
+
+  disclosures.forEach((details) => {
+    details.open = true;
+  });
+
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+
+  let canvas: HTMLCanvasElement;
+
+  try {
+    canvas = await html2canvas(
+      element,
+      {
+        backgroundColor: "#f6f8f7",
+        scale: 2,
+        useCORS: true
+      }
+    );
+  } finally {
+    disclosures.forEach((details, index) => {
+      details.open = disclosureStates[index];
+    });
+  }
   const image = canvas.toDataURL(
     "image/png"
   );
@@ -1289,15 +1317,197 @@ function reportInsights(
   ]).slice(0, 7);
 }
 
+function ReportDisclosure({
+  number,
+  title,
+  description,
+  defaultOpen = false,
+  children,
+  className = "",
+}: {
+  number: string;
+  title: string;
+  description?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <details
+      className={`report-disclosure ${className}`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span className="report-disclosure-number">{number}</span>
+        <span className="report-disclosure-heading">
+          <strong>{title}</strong>
+          {description && <small>{description}</small>}
+        </span>
+        <span className="report-disclosure-state" aria-hidden="true">
+          {open ? "Hide" : "Show"}
+        </span>
+        <span className="report-disclosure-chevron" aria-hidden="true" />
+      </summary>
+      <div className="report-disclosure-content">{children}</div>
+    </details>
+  );
+}
+
+const COMPANY_METRICS = [
+  ["current_price", "Current Price"],
+  ["market_cap", "Market Cap"],
+  ["pe_ratio", "P/E Ratio"],
+  ["pb_ratio", "P/B Ratio"],
+  ["roe", "ROE"],
+  ["profit_margin", "Profit Margin"],
+  ["revenue_growth", "Revenue Growth"],
+  ["debt_to_equity", "Debt/Equity"],
+] as const;
+
+function CompanyMetricComparison({
+  companies,
+}: {
+  companies: Record<string, unknown>[];
+}) {
+  if (companies.length < 2) return null;
+
+  const metrics = COMPANY_METRICS.filter(([key]) =>
+    companies.some((company) => {
+      const value = asRecord(company.key_metrics)[key];
+      return value !== null && value !== undefined && value !== "";
+    })
+  );
+
+  if (!metrics.length) return null;
+
+  return (
+    <section className="comparison-workspace" aria-labelledby="metric-comparison-title">
+      <div className="comparison-workspace-heading">
+        <div>
+          <span>Side-by-side evidence</span>
+          <h3 id="metric-comparison-title">Financial comparison</h3>
+        </div>
+        <small>{companies.length} companies</small>
+      </div>
+      <div
+        className="comparison-table-scroll"
+        role="region"
+        aria-label="Scrollable financial comparison table"
+        tabIndex={0}
+      >
+        <table className="comparison-table comparison-table-metrics">
+          <thead>
+            <tr>
+              <th scope="col">Metric</th>
+              {companies.map((company, index) => (
+                <th scope="col" key={`${asString(company.ticker, "company")}-${index}`}>
+                  <strong>{asString(company.company_name, `Company ${index + 1}`)}</strong>
+                  <small>{asString(company.ticker)}</small>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map(([key, label]) => (
+              <tr key={key}>
+                <th scope="row">{label}</th>
+                {companies.map((company, index) => {
+                  const value = asRecord(company.key_metrics)[key];
+                  return (
+                    <td key={`${key}-${asString(company.ticker, String(index))}`}>
+                      {value === null || value === undefined || value === ""
+                        ? <span className="data-status-missing">Not available</span>
+                        : asString(value)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function companyRecordItems(
+  record: Record<string, unknown>,
+  company: string
+) {
+  const match = Object.entries(record).find(
+    ([key]) => key.toLowerCase() === company.toLowerCase()
+  );
+
+  return match ? flattenedList(match[1]) : [];
+}
+
+function PeerDecisionTable({ payload }: { payload: Record<string, unknown> }) {
+  const companies = asList(payload.companies_compared);
+  const analyses = asList(payload.comparative_analysis);
+  const strengths = asRecord(payload.strengths);
+  const risks = asRecord(payload.risks);
+
+  if (companies.length < 2) return null;
+
+  return (
+    <section className="comparison-workspace" aria-labelledby="peer-comparison-title">
+      <div className="comparison-workspace-heading">
+        <div>
+          <span>Decision matrix</span>
+          <h3 id="peer-comparison-title">Peer comparison</h3>
+        </div>
+        <small>{companies.length} companies</small>
+      </div>
+      <div
+        className="comparison-table-scroll"
+        role="region"
+        aria-label="Scrollable peer comparison table"
+        tabIndex={0}
+      >
+        <table className="comparison-table comparison-table-qualitative">
+          <thead>
+            <tr>
+              <th scope="col">Company</th>
+              <th scope="col">Key strength</th>
+              <th scope="col">Main risk</th>
+              <th scope="col">Current read</th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.map((company, index) => {
+              const companyStrengths = companyRecordItems(strengths, company);
+              const companyRisks = companyRecordItems(risks, company);
+
+              return (
+                <tr key={company}>
+                  <th scope="row">{company}</th>
+                  <td>{companyStrengths.slice(0, 2).join("; ") || "Not highlighted"}</td>
+                  <td>{companyRisks.slice(0, 2).join("; ") || "Not highlighted"}</td>
+                  <td>{analyses[index] || "No company-specific assessment provided."}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function ReportInsightList({ insights }: { insights: string[] }) {
   if (!insights.length) return null;
 
   return (
-    <section className="report-section report-insights-card">
-      <div className="report-section-title">
-        <span>01</span>
-        <h3>Key Insights</h3>
-      </div>
+    <ReportDisclosure
+      number="01"
+      title="Key Insights"
+      description={`${insights.length} decision-relevant observations`}
+      defaultOpen
+      className="report-insights-card"
+    >
       <div className="report-insight-list">
         {insights.map((insight) => (
           <div className="report-insight-row" key={insight}>
@@ -1306,7 +1516,7 @@ function ReportInsightList({ insights }: { insights: string[] }) {
           </div>
         ))}
       </div>
-    </section>
+    </ReportDisclosure>
   );
 }
 
@@ -1341,98 +1551,134 @@ function ResultBody({
   const detailed = answerDetail === "detailed";
 
   if (route === "REPORT") {
-    const companies = asList(payload.companies)
-      .map((company) => asRecord(company))
-      .filter((company) => Object.keys(company).length > 0);
+    const companies = asRecordList(payload.companies);
     const firstCompany = companies[0] || {};
     const insights = reportInsights(
       payload,
       companies
     );
+    const watchlistTriggers = asList(payload.watchlist_triggers);
+    const nextChecks = asList(payload.next_checks);
+    const hasEvidence =
+      asList(payload.sources_used).length > 0
+      || Object.keys(asRecord(payload.confidence_breakdown)).length > 0;
 
     return (
       <div className="report-page">
         <ReportMetricStrip companies={companies} />
 
-        <section className="report-section report-overview">
-          <div className="report-section-title">
-            <span>00</span>
-            <h3>Stock Overview</h3>
-          </div>
+        <ReportDisclosure
+          number="00"
+          title="Stock Overview"
+          description="Scope, thesis, and current context"
+          defaultOpen
+          className="report-overview"
+        >
           <p>{asString(payload.stock_overview, asString(payload.executive_summary))}</p>
-        </section>
+        </ReportDisclosure>
 
         <ReportInsightList insights={insights} />
 
-        <div className="report-three-grid">
-          <ReportTextCard
-            title="Current Performance"
-            copy={
-              asString(payload.current_performance)
-              || asString(firstCompany.business_snapshot)
-              || asString(firstCompany.financial_quality)
-              || payload.sector_context
-            }
-            tone="green"
-          />
-          <ReportTextCard
-            title="Risk Assessment"
-            copy={
-              asString(payload.risk_assessment)
-              || flattenedList(payload.key_risks || firstCompany.risks).join(" ")
-            }
-            tone="red"
-          />
-          <ReportTextCard
-            title="Valuation & Outlook"
-            copy={
-              asString(payload.valuation_outlook)
-              || asString(firstCompany.valuation_view)
-              || asString(payload.comparative_view)
-              || asString(payload.investment_view)
-            }
-            tone="amber"
-          />
-        </div>
+        <CompanyMetricComparison companies={companies} />
 
-        <div className="report-two-grid">
-          <Panel title="Research View" tone="green">
-            {payload.research_view || payload.investment_view}
-          </Panel>
-          <Panel title="Sector Context" tone="blue">
-            {payload.sector_context}
-          </Panel>
-        </div>
+        <ReportDisclosure
+          number="02"
+          title="Performance, Risk & Valuation"
+          description="Core factors that shape the investment view"
+          defaultOpen
+        >
+          <div className="report-three-grid">
+            <ReportTextCard
+              title="Current Performance"
+              copy={
+                asString(payload.current_performance)
+                || asString(firstCompany.business_snapshot)
+                || asString(firstCompany.financial_quality)
+                || payload.sector_context
+              }
+              tone="green"
+            />
+            <ReportTextCard
+              title="Risk Assessment"
+              copy={
+                asString(payload.risk_assessment)
+                || flattenedList(payload.key_risks || firstCompany.risks).join(" ")
+              }
+              tone="red"
+            />
+            <ReportTextCard
+              title="Valuation & Outlook"
+              copy={
+                asString(payload.valuation_outlook)
+                || asString(firstCompany.valuation_view)
+                || asString(payload.comparative_view)
+                || asString(payload.investment_view)
+              }
+              tone="amber"
+            />
+          </div>
+        </ReportDisclosure>
 
-        <Panel title="Source Quality" tone="blue">
-          {asString(
-            asRecord(payload.source_quality).quality_view,
-            sourceCountText(payload.sources_used)
-          )}
-        </Panel>
+        <ReportDisclosure
+          number="03"
+          title="Research Context"
+          description="Sector backdrop and source-quality assessment"
+        >
+          <div className="report-two-grid">
+            <Panel title="Research View" tone="green">
+              {payload.research_view || payload.investment_view}
+            </Panel>
+            <Panel title="Sector Context" tone="blue">
+              {payload.sector_context}
+            </Panel>
+          </div>
+
+          <Panel title="Source Quality" tone="blue">
+            {asString(
+              asRecord(payload.source_quality).quality_view,
+              sourceCountText(payload.sources_used)
+            )}
+          </Panel>
+        </ReportDisclosure>
 
         {companies.length > 1 && (
-          <section className="report-section">
-            <div className="report-section-title">
-              <span>02</span>
-              <h3>Company Details</h3>
-            </div>
+          <ReportDisclosure
+            number="04"
+            title="Company Details"
+            description={`Deep dive across ${companies.length} companies`}
+          >
             {companies.map((company, index) => (
               <ReportCompanyCard
                 company={company}
                 key={`${asString(company.ticker, "company")}-${index}`}
               />
             ))}
-          </section>
+          </ReportDisclosure>
         )}
 
-        <div className="report-two-grid">
-          <ListPanel title="Watchlist Triggers" items={payload.watchlist_triggers} tone="green" />
-          <ListPanel title="Next Checks" items={payload.next_checks} />
-        </div>
+        {(watchlistTriggers.length > 0 || nextChecks.length > 0) && (
+          <ReportDisclosure
+            number="05"
+            title="Monitoring Plan"
+            description="Triggers and diligence steps to track next"
+          >
+            <div className="report-two-grid">
+              <ListPanel title="Watchlist Triggers" items={payload.watchlist_triggers} tone="green" />
+              <ListPanel title="Next Checks" items={payload.next_checks} />
+            </div>
+          </ReportDisclosure>
+        )}
 
-        <Sources sources={payload.sources_used} />
-        <ConfidenceBreakdown breakdown={payload.confidence_breakdown} />
+        {hasEvidence && (
+          <ReportDisclosure
+            number="06"
+            title="Evidence & Confidence"
+            description="Source links and confidence methodology"
+          >
+            <Sources sources={payload.sources_used} />
+            <ConfidenceBreakdown breakdown={payload.confidence_breakdown} />
+          </ReportDisclosure>
+        )}
       </div>
     );
   }
@@ -1533,14 +1779,30 @@ function ResultBody({
         <Panel title="Winner Summary" tone="green">
           {payload.winner_summary}
         </Panel>
+        <PeerDecisionTable payload={payload} />
         {detailed && (
           <>
-            <ListPanel title="Comparative Analysis" items={payload.comparative_analysis} />
-            <ListPanel title="Strengths" items={Object.values(asRecord(payload.strengths)).flat()} tone="green" />
-            <ListPanel title="Risks" items={Object.values(asRecord(payload.risks)).flat()} tone="red" />
-            <Panel title="Balanced View">{payload.balanced_view}</Panel>
-            <Sources sources={payload.sources_used} />
-            <ConfidenceBreakdown breakdown={payload.confidence_breakdown} />
+            <ReportDisclosure
+              number="01"
+              title="Detailed Comparison"
+              description="Company-level analysis, strengths, and risks"
+              defaultOpen
+            >
+              <ListPanel title="Comparative Analysis" items={payload.comparative_analysis} />
+              <div className="report-two-grid">
+                <ListPanel title="Strengths" items={Object.values(asRecord(payload.strengths)).flat()} tone="green" />
+                <ListPanel title="Risks" items={Object.values(asRecord(payload.risks)).flat()} tone="red" />
+              </div>
+              <Panel title="Balanced View">{payload.balanced_view}</Panel>
+            </ReportDisclosure>
+            <ReportDisclosure
+              number="02"
+              title="Evidence & Confidence"
+              description="Source links and confidence methodology"
+            >
+              <Sources sources={payload.sources_used} />
+              <ConfidenceBreakdown breakdown={payload.confidence_breakdown} />
+            </ReportDisclosure>
           </>
         )}
       </>
@@ -1587,26 +1849,31 @@ function InvestmentSnapshot({
   const hasConfidence = score > 0;
   const snapshotItems = [
     {
+      key: "view",
       label: "View",
       value: getSnapshotView(route, payload),
     },
     {
+      key: "reason",
       label: "Key reason",
       value: getSnapshotReason(route, payload),
       wide: true,
     },
     {
+      key: "confidence",
       label: "Confidence",
       value: hasConfidence
         ? `${confidencePercent}% (${confidenceLabel(score)})`
         : "Not provided",
     },
     {
+      key: "risk",
       label: "Main risk",
       value: getSnapshotRisk(payload),
       wide: true,
     },
     {
+      key: "sources",
       label: "Source count",
       value: sourceCount
         ? `${sourceCount} source link${sourceCount === 1 ? "" : "s"}`
@@ -1634,8 +1901,8 @@ function InvestmentSnapshot({
       <div className="investment-snapshot-grid">
         {snapshotItems.map((item) => (
           <article
-            className={`investment-snapshot-item ${item.wide ? "investment-snapshot-item-wide" : ""}`}
-            key={item.label}
+            className={`investment-snapshot-item investment-snapshot-item-${item.key} ${item.wide ? "investment-snapshot-item-wide" : ""}`}
+            key={item.key}
           >
             <span>{item.label}</span>
             <strong>{conciseSnapshotText(item.value)}</strong>
@@ -1656,14 +1923,15 @@ function AssistantResultMessage({
   mode?: WorkMode;
 }) {
   const exportRef = useRef<HTMLElement | null>(null);
+  const snapshotRef = useRef<HTMLDivElement | null>(null);
+  const analysisRef = useRef<HTMLElement | null>(null);
+  const sourcesRef = useRef<HTMLDivElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const payload = result.response?.data || {};
   const score = getConfidenceScore(payload, result);
   const sourceCount = asList(payload.sources_used || payload.sources).length;
   const sources = payload.sources_used || payload.sources;
   const isReport = mode === "report";
-  const confidencePercent = Math.round(score * 100);
-  const hasConfidence = score > 0;
   const canExport =
     isReport
     || (result.answer_detail || fallbackDetail) === "detailed";
@@ -1684,20 +1952,44 @@ function AssistantResultMessage({
     }
   }
 
+  function scrollToSection(ref: { current: HTMLElement | null }) {
+    ref.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  }
+
   return (
     <section
       className={`result-shell assistant-message ${isReport ? "report-result" : ""}`}
       ref={exportRef}
     >
-      <InvestmentSnapshot
-        route={result.route}
-        payload={payload}
-        score={score}
-        sourceCount={sourceCount}
-        canExport={canExport}
-        exporting={exporting}
-        onExportPdf={handleExportPdf}
-      />
+      <div className="result-section-anchor" ref={snapshotRef}>
+        <InvestmentSnapshot
+          route={result.route}
+          payload={payload}
+          score={score}
+          sourceCount={sourceCount}
+          canExport={canExport}
+          exporting={exporting}
+          onExportPdf={handleExportPdf}
+        />
+      </div>
+      <div className="result-section-nav" role="navigation" aria-label="Result sections">
+        <button type="button" onClick={() => scrollToSection(snapshotRef)}>
+          Snapshot
+        </button>
+        <button type="button" onClick={() => scrollToSection(analysisRef)}>
+          Analysis
+        </button>
+        {sourceCount > 0 && (
+          <button type="button" onClick={() => scrollToSection(sourcesRef)}>
+            Sources <span>{sourceCount}</span>
+          </button>
+        )}
+      </div>
       {isReport && (
         <div className="report-cover">
           <span>FinIntel analyst report</span>
@@ -1705,64 +1997,40 @@ function AssistantResultMessage({
           <p>{result.query}</p>
         </div>
       )}
-      <div className="summary-grid">
-        <section className="summary-card">
-          <div className="summary-topline">
-            <span className={`badge ${isReport ? "badge-report" : ""}`}>
-              {modeLabel(mode)}
-            </span>
-            <span className="badge">{routeLabel(result.route)}</span>
-            <span className="badge badge-muted">
-              {(result.answer_detail || fallbackDetail) === "detailed" ? "Detailed" : "Brief"}
-            </span>
-            <span className="muted">{result.query}</span>
-          </div>
-          <h2>{getPayloadTitle(result.route, payload)}</h2>
+      <section className="answer-overview" ref={analysisRef}>
+        <div className="summary-topline">
+          <span className={`badge ${isReport ? "badge-report" : ""}`}>
+            {modeLabel(mode)}
+          </span>
+          <span className="badge">{routeLabel(result.route)}</span>
+          <span className="badge badge-muted">
+            {(result.answer_detail || fallbackDetail) === "detailed" ? "Detailed" : "Brief"}
+          </span>
           {Boolean(payload.ticker) && (
-            <p className="ticker">{asString(payload.ticker)}</p>
+            <span className="ticker">{asString(payload.ticker)}</span>
           )}
-          <p>
-            {asString(
-              getRouteSummary(result.route, payload),
-              result.routing?.reasoning || "Route selected by query analysis."
-            )}
-          </p>
-          <div className="result-meta">
-            <StatPill label="Route" value={routeLabel(result.route)} />
-            <StatPill label="Verified sources" value={sourceCount ? sourceCount : "Not provided"} />
-            <StatPill label="Routing confidence" value={formatPercent(result.routing?.confidence)} />
-          </div>
-        </section>
-
-        <section
-          className="confidence-card"
-          aria-label={
-            hasConfidence
-              ? `Confidence score ${confidencePercent} percent`
-              : "Confidence score not provided"
-          }
-        >
-          <span>Confidence</span>
-          <strong>{hasConfidence ? `${confidencePercent}%` : "N/A"}</strong>
-          <small>{hasConfidence ? confidenceLabel(score) : "Not provided"}</small>
-          <div
-            className="meter"
-            role="meter"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={hasConfidence ? confidencePercent : undefined}
-            aria-label="Confidence score"
-          >
-            <div style={{ width: `${hasConfidence ? confidencePercent : 0}%` }} />
-          </div>
-        </section>
-      </div>
+        </div>
+        <p className="answer-query">{result.query}</p>
+        <p className="answer-lede">
+          {asString(
+            getRouteSummary(result.route, payload),
+            result.routing?.reasoning || "Route selected by query analysis."
+          )}
+        </p>
+        <div className="result-meta">
+          <StatPill label="Route" value={routeLabel(result.route)} />
+          <StatPill label="Verified sources" value={sourceCount ? sourceCount : "Not provided"} />
+          <StatPill label="Routing confidence" value={formatPercent(result.routing?.confidence)} />
+        </div>
+      </section>
 
       {sourceCount > 0 && (
-        <Sources
-          sources={sources}
-          compact
-        />
+        <div className="result-section-anchor" ref={sourcesRef}>
+          <Sources
+            sources={sources}
+            compact
+          />
+        </div>
       )}
 
       <GuardrailNotice guardrails={payload.guardrails} />
@@ -1801,6 +2069,7 @@ export default function App({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authOpen, setAuthOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [answerDetail, setAnswerDetail] = useState<AnswerDetail>("brief");
   const [workMode, setWorkMode] = useState<WorkMode>("chat");
   const [email, setEmail] = useState("");
@@ -1840,10 +2109,15 @@ export default function App({
       : APP_API_KEY
         ? "Development API key"
         : "Sign in required";
+  const mobileAuthLabel = displayedUser
+    ? displayedUser.full_name.split(" ")[0]
+    : "Sign in";
 
   const resultRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const authDialogRef = useRef<HTMLElement | null>(null);
+  const mobileNavToggleRef = useRef<HTMLButtonElement | null>(null);
+  const mobileNavCloseRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (messages.length || loading || error) {
@@ -1881,6 +2155,54 @@ export default function App({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [authOpen]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusTimer = window.setTimeout(() => {
+      mobileNavCloseRef.current?.focus();
+    }, 240);
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", closeOnEscape);
+
+      if (
+        document
+          .getElementById("research-navigation")
+          ?.contains(document.activeElement)
+      ) {
+        mobileNavToggleRef.current?.focus();
+      }
+    };
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    const desktopLayout = window.matchMedia("(min-width: 881px)");
+
+    function closeDrawerOnDesktop() {
+      if (desktopLayout.matches) {
+        setMobileNavOpen(false);
+      }
+    }
+
+    desktopLayout.addEventListener("change", closeDrawerOnDesktop);
+
+    return () => {
+      desktopLayout.removeEventListener("change", closeDrawerOnDesktop);
+    };
+  }, []);
 
   useEffect(() => {
     if (externalAuth?.enabled) {
@@ -1953,6 +2275,7 @@ export default function App({
 
   function selectExample(example: string) {
     setQuery(example);
+    setMobileNavOpen(false);
     requestAnimationFrame(() => composerInputRef.current?.focus());
   }
 
@@ -2048,13 +2371,38 @@ export default function App({
 
   return (
     <main className="chat-app">
-      <aside className="chat-sidebar">
-        <div className="brand">
-          <img src="/finintel-logo.png" alt="FinIntel AI logo" />
-          <div>
-            <strong>FinIntel AI</strong>
-            <span>Indian Market Intelligence</span>
+      {mobileNavOpen && (
+        <button
+          className="mobile-nav-backdrop"
+          type="button"
+          aria-label="Close research navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`chat-sidebar ${mobileNavOpen ? "mobile-nav-open" : ""}`}
+        id="research-navigation"
+        aria-label="Research navigation"
+      >
+        <div className="sidebar-header">
+          <div className="brand">
+            <img src="/finintel-logo.png" alt="FinIntel AI logo" />
+            <div>
+              <strong>FinIntel AI</strong>
+              <span>Indian Market Intelligence</span>
+            </div>
           </div>
+
+          <button
+            className="sidebar-close-button"
+            type="button"
+            aria-label="Close research navigation"
+            onClick={() => setMobileNavOpen(false)}
+            ref={mobileNavCloseRef}
+          >
+            <span aria-hidden="true">x</span>
+          </button>
         </div>
 
         <div className="sidebar-snapshot" aria-label="Session snapshot">
@@ -2076,6 +2424,7 @@ export default function App({
             setMessages([]);
             setError("");
             setCurrentConversationId("");
+            setMobileNavOpen(false);
           }}
         >
           + New research chat
@@ -2089,7 +2438,10 @@ export default function App({
               type="button"
               aria-label="Chat"
               aria-pressed={workMode === "chat"}
-              onClick={() => setWorkMode("chat")}
+              onClick={() => {
+                setWorkMode("chat");
+                setMobileNavOpen(false);
+              }}
             >
               <span>Chat</span>
               <small>Focused answers</small>
@@ -2099,7 +2451,10 @@ export default function App({
               type="button"
               aria-label="Generate report"
               aria-pressed={workMode === "report"}
-              onClick={() => setWorkMode("report")}
+              onClick={() => {
+                setWorkMode("report");
+                setMobileNavOpen(false);
+              }}
             >
               <span>Generate report</span>
               <small>Export-ready brief</small>
@@ -2107,23 +2462,25 @@ export default function App({
           </div>
         </section>
 
-        <section className="sidebar-section">
-          <div className="sidebar-title">
-            {workMode === "report" ? "Report ideas" : "Try asking"}
-          </div>
-          <div className="example-list">
-            {modeExamples.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => selectExample(example)}
-                aria-label={`Use prompt: ${example}`}
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-        </section>
+        {(messages.length > 0 || loading || Boolean(error)) && (
+          <section className="sidebar-section">
+            <div className="sidebar-title">
+              {workMode === "report" ? "Report ideas" : "Try asking"}
+            </div>
+            <div className="example-list">
+              {modeExamples.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => selectExample(example)}
+                  aria-label={`Use prompt: ${example}`}
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="sidebar-section sidebar-history">
           <div className="sidebar-title">Recent chats</div>
@@ -2158,6 +2515,7 @@ export default function App({
                       storedMessages
                     )
                   );
+                  setMobileNavOpen(false);
                 }}
               >
                 <span>{formatHistoryDate(item.updated_at) || "Conversation"}</span>
@@ -2181,8 +2539,25 @@ export default function App({
         </section>
       </aside>
 
-      <section className="chat-main">
+      <section className="chat-main" inert={mobileNavOpen ? true : undefined}>
         <header className="chat-topbar">
+          <button
+            className="mobile-nav-toggle"
+            type="button"
+            aria-label="Open research navigation"
+            aria-controls="research-navigation"
+            aria-expanded={mobileNavOpen}
+            onClick={() => setMobileNavOpen(true)}
+            ref={mobileNavToggleRef}
+          >
+            <span className="mobile-nav-icon" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span>Menu</span>
+          </button>
+
           <div className="topbar-heading">
             <p className="eyebrow">{modeCopy.eyebrow}</p>
             <h1 className="topbar-title">{modeCopy.title}</h1>
@@ -2208,7 +2583,12 @@ export default function App({
               }
             >
               <span className="nav-auth-icon" aria-hidden="true" />
-              {displayedUser ? displayedUser.full_name : "Sign Up / Login"}
+              <span className="nav-auth-label nav-auth-label-full">
+                {displayedUser ? displayedUser.full_name : "Sign Up / Login"}
+              </span>
+              <span className="nav-auth-label nav-auth-label-mobile">
+                {mobileAuthLabel}
+              </span>
               <span className="nav-auth-caret" aria-hidden="true" />
             </button>
           </div>
