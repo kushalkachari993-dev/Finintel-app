@@ -1151,6 +1151,81 @@ h1 {
   color: #ffffff;
 }
 
+.auth-card button.clerk-forgot-password {
+  background: transparent;
+  color: #0f766e;
+  min-height: 36px;
+  margin-top: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-card button.clerk-forgot-password:hover {
+  background: #eef7f4;
+}
+
+.clerk-reset-flow {
+  margin-top: 14px;
+}
+
+.clerk-reset-heading strong {
+  font-size: 17px;
+}
+
+.clerk-reset-heading p {
+  color: #60756e;
+  line-height: 1.45;
+  margin: 6px 0 14px;
+}
+
+.clerk-reset-flow form {
+  display: grid;
+  gap: 8px;
+}
+
+.clerk-reset-flow label {
+  color: #24534a;
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.clerk-reset-flow input {
+  margin-top: 0;
+}
+
+.clerk-reset-error {
+  background: #fff2f0;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #9f1239;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 4px 0 0;
+  padding: 10px;
+}
+
+.clerk-reset-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: 4px;
+}
+
+.clerk-reset-actions button {
+  margin-top: 0;
+}
+
+.clerk-reset-actions button.secondary {
+  background: #eef7f4;
+  color: #24534a;
+}
+
+.clerk-reset-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .detail-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
