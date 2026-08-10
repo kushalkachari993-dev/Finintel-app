@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { clerk } from "@clerk/testing/playwright";
 
 type HistoryItem = {
   conversation_id: string;
@@ -9,6 +10,13 @@ type HistoryItem = {
 };
 
 const now = Math.floor(Date.now() / 1000);
+const clerkTestUserEmail = process.env.E2E_CLERK_USER_EMAIL || "";
+const clerkTestConfigured = Boolean(
+  process.env.CLERK_PUBLISHABLE_KEY
+  && process.env.CLERK_SECRET_KEY
+  && clerkTestUserEmail
+);
+test.skip(!clerkTestConfigured, "Clerk E2E credentials are not configured.");
 const historyItems: HistoryItem[] = Array.from({ length: 75 }, (_, index) => ({
   conversation_id: `conversation-${index + 1}`,
   title: index === 71 ? "Renewable energy watchlist" : `Research conversation ${index + 1}`,
@@ -18,16 +26,6 @@ const historyItems: HistoryItem[] = Array.from({ length: 75 }, (_, index) => ({
 }));
 
 async function loadHistory(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("finintel_token", "test-token");
-    localStorage.setItem("finintel_user", JSON.stringify({
-      id: 1,
-      email: "investor@example.com",
-      full_name: "Test Investor",
-      role: "user",
-    }));
-  });
-
   await page.route("**/chat/conversations?*", async (route) => {
     const requestUrl = new URL(route.request().url());
     const search = (requestUrl.searchParams.get("search") || "").toLowerCase();
@@ -62,6 +60,11 @@ async function loadHistory(page: Page) {
   });
 
   await page.goto("/");
+  await clerk.signIn({
+    page,
+    emailAddress: clerkTestUserEmail,
+  });
+  await page.reload();
 }
 
 test("keeps a large history bounded, searchable, and manageable", async ({ page }, testInfo) => {

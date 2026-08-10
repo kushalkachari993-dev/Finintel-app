@@ -2,7 +2,6 @@ import pytest
 from pathlib import Path
 
 from backend.audit import ChatAuditStore
-from backend.security.user_auth import UserStore
 from backend.storage import database_backend
 from backend.storage import normalize_database_url
 from backend.storage import resolve_sqlite_path
@@ -42,25 +41,17 @@ def test_detects_and_normalizes_postgres_database_url():
     )
 
 
-def test_user_and_audit_stores_can_share_database_url(tmp_path):
+def test_audit_store_uses_database_url_for_clerk_principals(tmp_path):
     database_url = f"sqlite:///{(tmp_path / 'finintel.sqlite3').as_posix()}"
 
-    user_store = UserStore(
-        database_url=database_url
-    )
     audit_store = ChatAuditStore(
         database_url=database_url
     )
 
-    user = user_store.create_user(
-        email="shared@example.com",
-        password="strong-password",
-        full_name="Shared User"
-    )
     audit_store.record_chat(
         request_id="req-shared",
-        principal_id=f"user:{user.user_id}",
-        user_id=user.user_id,
+        principal_id="clerk:user_shared",
+        user_id=None,
         api_client_id=None,
         query="What is ROE?",
         route="EDUCATIONAL",
@@ -80,9 +71,6 @@ def test_user_and_audit_stores_can_share_database_url(tmp_path):
         latency_ms=12.0
     )
 
-    assert user_store.get_user_by_email(
-        "shared@example.com"
-    )
     assert audit_store.list_for_principal(
-        f"user:{user.user_id}"
+        "clerk:user_shared"
     )[0]["query"] == "What is ROE?"

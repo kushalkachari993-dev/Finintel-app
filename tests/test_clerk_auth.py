@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend import main
+from backend.config import settings
 from backend.security.clerk_auth import ClerkAuthenticator
 
 
@@ -15,6 +17,54 @@ def test_clerk_authenticator_disabled_without_jwks_url():
     assert authenticator.authenticate(
         "token"
     ) is None
+
+
+def test_clerk_authenticator_requires_issuer():
+    authenticator = ClerkAuthenticator(
+        jwks_url="https://clerk.example.test/.well-known/jwks.json",
+        issuer="",
+        audience="",
+    )
+
+    assert authenticator.enabled is False
+
+
+def test_clerk_authenticator_rejects_claims_without_subject(monkeypatch):
+    authenticator = ClerkAuthenticator(
+        jwks_url="https://clerk.example.test/.well-known/jwks.json",
+        issuer="https://clerk.example.test",
+        audience="",
+    )
+    monkeypatch.setattr(
+        authenticator,
+        "verify_token",
+        lambda token: {"email": "missing-sub@example.com"},
+    )
+
+    assert authenticator.authenticate("token") is None
+
+
+def test_required_settings_fail_closed_without_clerk(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setattr(settings, "TAVILY_API_KEY", "test-tavily-key")
+    monkeypatch.setattr(settings, "CLERK_JWKS_URL", "")
+    monkeypatch.setattr(settings, "CLERK_ISSUER", "")
+    monkeypatch.setattr(
+        settings,
+        "AUDIT_DATABASE_PATH",
+        str(tmp_path / "audit.sqlite3"),
+    )
+    monkeypatch.setattr(
+        settings.MigrationRunner,
+        "apply_pending",
+        lambda self: [],
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="CLERK_JWKS_URL, CLERK_ISSUER",
+    ):
+        settings.validate_required_settings()
 
 
 def test_clerk_user_from_claims_maps_role_and_profile():

@@ -41,9 +41,9 @@ jobs:
           GROQ_API_KEY: test-groq-key
           TAVILY_API_KEY: test-tavily-key
           APP_API_KEY: test-api-key
-          AUTH_TOKEN_SECRET: test-auth-secret
+          CLERK_JWKS_URL: https://clerk.example.test/.well-known/jwks.json
+          CLERK_ISSUER: https://clerk.example.test
           DATABASE_URL: sqlite:///tmp/finintel-ci.sqlite3
-          AUTH_DATABASE_PATH: /tmp/finintel-ci.sqlite3
           AUDIT_DATABASE_PATH: /tmp/finintel-ci.sqlite3
           FRONTEND_ALLOWED_ORIGINS: http://localhost:5173
           SENTRY_DSN: ""
@@ -74,7 +74,7 @@ jobs:
       - name: Build frontend
         env:
           VITE_BACKEND_API_URL: http://127.0.0.1:8000
-          VITE_CLERK_PUBLISHABLE_KEY: ""
+          VITE_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA
           VITE_APP_ENV: test
           VITE_APP_RELEASE: finintel-ai-frontend@ci
           VITE_SENTRY_DSN: ""

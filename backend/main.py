@@ -2,7 +2,6 @@ import logging
 import asyncio
 import json
 import re
-import sqlite3
 import time
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -80,8 +79,6 @@ from backend.utils.financial_guardrails import (
 
 from backend.security import APIKeyAuthenticator
 from backend.security import ClerkAuthenticator
-from backend.security import TokenService
-from backend.security import UserStore
 
 from backend.observability import observability
 from backend.observability.metrics import RequestTrace
@@ -105,10 +102,6 @@ api_key_authenticator = APIKeyAuthenticator(
     legacy_api_key=settings.APP_API_KEY
 )
 
-user_store = UserStore()
-
-token_service = TokenService()
-
 clerk_authenticator = ClerkAuthenticator()
 
 chat_audit_store = ChatAuditStore()
@@ -123,9 +116,6 @@ api_key_header = APIKeyHeader(
 async def lifespan(app: FastAPI):
 
     settings.validate_required_settings()
-    user_store.apply_initial_admins(
-        settings.AUTH_INITIAL_ADMIN_EMAILS
-    )
 
     yield
 
@@ -200,21 +190,9 @@ async def chat_security_middleware(
     ):
 
         bearer_token = authorization.removeprefix("Bearer ").strip()
-        token_payload = token_service.verify_token(
+        auth_user = clerk_authenticator.authenticate(
             bearer_token
         )
-
-        if token_payload:
-
-            auth_user = user_store.get_user_by_id(
-                int(token_payload["sub"])
-            )
-
-        if not auth_user:
-
-            auth_user = clerk_authenticator.authenticate(
-                bearer_token
-            )
 
     if (
         not api_client
@@ -235,18 +213,12 @@ async def chat_security_middleware(
             ),
             content={
                 "success": False,
-                "error": "Invalid or missing API key."
+                "error": "Invalid or missing credentials."
             }
         )
 
     principal_id = (
         f"clerk:{auth_user.user_id}"
-        if getattr(
-            auth_user,
-            "is_clerk",
-            False
-        )
-        else f"user:{auth_user.user_id}"
         if auth_user
         else f"client:{api_client.client_id}"
     )
@@ -503,41 +475,6 @@ def contextual_query(
     )
 
 
-class RegisterRequest(BaseModel):
-
-    email: str
-    password: str
-    full_name: str = ""
-
-
-class LoginRequest(BaseModel):
-
-    email: str
-    password: str
-
-
-class VerifyEmailRequest(BaseModel):
-
-    token: str
-
-
-class PasswordResetRequest(BaseModel):
-
-    email: str
-
-
-class PasswordResetConfirmRequest(BaseModel):
-
-    token: str
-    new_password: str
-
-
-class AdminUserUpdateRequest(BaseModel):
-
-    role: Literal["user", "admin"] | None = None
-    active: bool | None = None
-    email_verified: bool | None = None
-
 # ---------------------------------------------------
 # ROOT ROUTE
 # ---------------------------------------------------
@@ -621,53 +558,9 @@ def get_bearer_user(
 
         return None
 
-    payload = token_service.verify_token(
+    return clerk_authenticator.authenticate(
         authorization.removeprefix("Bearer ").strip()
     )
-
-    if payload:
-
-        user = user_store.get_user_by_id(
-            int(payload["sub"])
-        )
-
-        if user and user.active:
-
-            return user
-
-    clerk_user = clerk_authenticator.authenticate(
-        authorization.removeprefix("Bearer ").strip()
-    )
-
-    if clerk_user:
-
-        return clerk_user
-
-    return None
-
-
-def local_user_id_for_audit(user):
-
-    if getattr(
-        user,
-        "is_clerk",
-        False
-    ):
-
-        return None
-
-    return user.user_id if user else None
-
-
-def get_admin_user(
-    user=Security(get_bearer_user)
-):
-
-    if not user or user.role != "admin":
-
-        return None
-
-    return user
 
 
 def get_authenticated_principal(
@@ -696,215 +589,13 @@ def get_authenticated_principal(
     )
 
     if user:
-
-        principal_prefix = (
-            "clerk"
-            if getattr(
-                user,
-                "is_clerk",
-                False
-            )
-            else "user"
-        )
-
         return {
-            "principal_id": f"{principal_prefix}:{user.user_id}",
+            "principal_id": f"clerk:{user.user_id}",
             "user": user,
             "api_client": None
         }
 
     return None
-
-
-@app.post("/auth/register")
-def register(request: RegisterRequest):
-
-    if not settings.AUTH_ALLOW_REGISTRATION:
-
-        return JSONResponse(
-            status_code=403,
-            content={
-                "success": False,
-                "error": "Registration is disabled."
-            }
-        )
-
-    if len(request.password) < 8:
-
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error": "Password must be at least 8 characters."
-            }
-        )
-
-    try:
-
-        role = (
-            "admin"
-            if user_store.normalize_email(request.email)
-            in settings.AUTH_INITIAL_ADMIN_EMAILS
-            else "user"
-        )
-        verified = role == "admin"
-
-        user = user_store.create_user(
-            email=request.email,
-            password=request.password,
-            full_name=request.full_name,
-            role=role,
-            email_verified=verified
-        )
-
-    except Exception as error:
-
-        if (
-            not isinstance(
-                error,
-                sqlite3.IntegrityError
-            )
-            and "unique" not in str(error).lower()
-            and "duplicate" not in str(error).lower()
-        ):
-
-            raise
-
-        return JSONResponse(
-            status_code=409,
-            content={
-                "success": False,
-                "error": "An account with this email already exists."
-            }
-        )
-
-    access_token = token_service.create_token(
-        user
-    )
-    verification_token = None
-
-    if not user.email_verified:
-
-        verification_token = user_store.create_email_verification_token(
-            user.user_id
-        )
-
-    return {
-        "success": True,
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user_payload(user),
-        "email_verification_required": not user.email_verified,
-        "dev_email_verification_token": verification_token
-    }
-
-
-@app.post("/auth/login")
-def login(request: LoginRequest):
-
-    user = user_store.authenticate(
-        email=request.email,
-        password=request.password
-    )
-
-    if not user:
-
-        return JSONResponse(
-            status_code=401,
-            content={
-                "success": False,
-                "error": "Invalid email or password."
-            }
-        )
-
-    return {
-        "success": True,
-        "access_token": token_service.create_token(
-            user
-        ),
-        "token_type": "bearer",
-        "user": user_payload(user)
-    }
-
-
-@app.post("/auth/verify-email")
-def verify_email(request: VerifyEmailRequest):
-
-    user = user_store.verify_email_token(
-        request.token
-    )
-
-    if not user:
-
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error": "Invalid or expired verification token."
-            }
-        )
-
-    return {
-        "success": True,
-        "user": user_payload(user)
-    }
-
-
-@app.post("/auth/password-reset/request")
-def request_password_reset(request: PasswordResetRequest):
-
-    reset_token = user_store.create_password_reset_token(
-        request.email
-    )
-
-    response = {
-        "success": True,
-        "message": (
-            "If an account exists for that email, a password reset link will be available."
-        )
-    }
-
-    if reset_token:
-
-        response[
-            "dev_password_reset_token"
-        ] = reset_token
-
-    return response
-
-
-@app.post("/auth/password-reset/confirm")
-def confirm_password_reset(request: PasswordResetConfirmRequest):
-
-    if len(request.new_password) < 8:
-
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error": "Password must be at least 8 characters."
-            }
-        )
-
-    user = user_store.reset_password_with_token(
-        token=request.token,
-        new_password=request.new_password
-    )
-
-    if not user:
-
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error": "Invalid or expired reset token."
-            }
-        )
-
-    return {
-        "success": True,
-        "user": user_payload(user)
-    }
 
 
 @app.get("/auth/me")
@@ -923,73 +614,6 @@ def me(user=Security(get_bearer_user)):
     return {
         "success": True,
         "user": user_payload(user)
-    }
-
-
-@app.get("/admin/users")
-def admin_list_users(
-    limit: int = 100,
-    admin=Security(get_admin_user)
-):
-
-    if not admin:
-
-        return JSONResponse(
-            status_code=403,
-            content={
-                "success": False,
-                "error": "Admin access required."
-            }
-        )
-
-    return {
-        "success": True,
-        "users": [
-            user_payload(user)
-            for user in user_store.list_users(
-                limit=limit
-            )
-        ]
-    }
-
-
-@app.patch("/admin/users/{user_id}")
-def admin_update_user(
-    user_id: int,
-    request: AdminUserUpdateRequest,
-    admin=Security(get_admin_user)
-):
-
-    if not admin:
-
-        return JSONResponse(
-            status_code=403,
-            content={
-                "success": False,
-                "error": "Admin access required."
-            }
-        )
-
-    updated = user_store.update_user(
-        user_id,
-        role=request.role,
-        active=request.active,
-        email_verified=request.email_verified
-    )
-
-    if not updated:
-
-        return JSONResponse(
-            status_code=404,
-            content={
-                "success": False,
-                "error": "User not found."
-            }
-        )
-
-    return {
-        "success": True,
-        "user": user_payload(updated)
     }
 
 
@@ -1554,15 +1178,7 @@ async def chat(
                 "principal_id",
                 None
             ),
-            user_id=(
-                local_user_id_for_audit(
-                    getattr(
-                        http_request.state,
-                        "auth_user",
-                        None
-                    )
-                )
-            ),
+            user_id=None,
             api_client_id=(
                 http_request.state.api_client.client_id
                 if getattr(
@@ -1643,15 +1259,7 @@ async def chat(
                     "principal_id",
                     None
                 ),
-                user_id=(
-                    local_user_id_for_audit(
-                        getattr(
-                            http_request.state,
-                            "auth_user",
-                            None
-                        )
-                    )
-                ),
+                user_id=None,
                 api_client_id=(
                     http_request.state.api_client.client_id
                     if getattr(
@@ -1745,15 +1353,7 @@ async def chat(
                 "principal_id",
                 None
             ),
-            user_id=(
-                local_user_id_for_audit(
-                    getattr(
-                        http_request.state,
-                        "auth_user",
-                        None
-                    )
-                )
-            ),
+            user_id=None,
             api_client_id=(
                 http_request.state.api_client.client_id
                 if getattr(
@@ -2009,15 +1609,7 @@ async def report(
                 "principal_id",
                 None
             ),
-            user_id=(
-                local_user_id_for_audit(
-                    getattr(
-                        http_request.state,
-                        "auth_user",
-                        None
-                    )
-                )
-            ),
+            user_id=None,
             api_client_id=(
                 http_request.state.api_client.client_id
                 if getattr(
@@ -2086,15 +1678,7 @@ async def report(
                 "principal_id",
                 None
             ),
-            user_id=(
-                local_user_id_for_audit(
-                    getattr(
-                        http_request.state,
-                        "auth_user",
-                        None
-                    )
-                )
-            ),
+            user_id=None,
             api_client_id=(
                 http_request.state.api_client.client_id
                 if getattr(

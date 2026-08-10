@@ -38,8 +38,6 @@ services:
         value: "3600"
       - key: APP_API_KEY
         generateValue: true
-      - key: AUTH_TOKEN_SECRET
-        generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: finintel-ai-postgres
@@ -82,8 +80,6 @@ services:
         sync: false
       - key: CLERK_AUDIENCE
         sync: false
-      - key: AUTH_ALLOW_REGISTRATION
-        value: "true"
       - key: FRONTEND_ALLOWED_ORIGINS
         sync: false
 

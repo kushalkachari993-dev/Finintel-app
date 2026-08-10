@@ -135,67 +135,14 @@ DEFAULT_SQLITE_DATABASE_PATH = (
     else None
 )
 
-AUTH_DATABASE_URL = os.getenv(
-    "AUTH_DATABASE_URL",
-    DATABASE_URL
-)
-
 AUDIT_DATABASE_URL = os.getenv(
     "AUDIT_DATABASE_URL",
     DATABASE_URL
 )
 
-AUTH_DATABASE_PATH = os.getenv(
-    "AUTH_DATABASE_PATH"
-) or DEFAULT_SQLITE_DATABASE_PATH
-
 AUDIT_DATABASE_PATH = os.getenv(
     "AUDIT_DATABASE_PATH"
 ) or DEFAULT_SQLITE_DATABASE_PATH
-
-AUTH_TOKEN_SECRET = os.getenv(
-    "AUTH_TOKEN_SECRET",
-    APP_API_KEY
-    or "dev-only-change-me"
-)
-
-AUTH_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv(
-        "AUTH_TOKEN_EXPIRE_MINUTES",
-        "1440"
-    )
-)
-
-AUTH_ALLOW_REGISTRATION = (
-    os.getenv(
-        "AUTH_ALLOW_REGISTRATION",
-        "true"
-    ).lower()
-    == "true"
-)
-
-AUTH_EMAIL_VERIFICATION_TOKEN_MINUTES = int(
-    os.getenv(
-        "AUTH_EMAIL_VERIFICATION_TOKEN_MINUTES",
-        "1440"
-    )
-)
-
-AUTH_PASSWORD_RESET_TOKEN_MINUTES = int(
-    os.getenv(
-        "AUTH_PASSWORD_RESET_TOKEN_MINUTES",
-        "30"
-    )
-)
-
-AUTH_INITIAL_ADMIN_EMAILS = [
-    email.strip().lower()
-    for email in os.getenv(
-        "AUTH_INITIAL_ADMIN_EMAILS",
-        ""
-    ).split(",")
-    if email.strip()
-]
 
 CLERK_JWKS_URL = os.getenv(
     "CLERK_JWKS_URL"
@@ -307,38 +254,26 @@ def validate_required_settings():
 
         missing.append("TAVILY_API_KEY")
 
-    if (
-        not APP_API_KEY
-        and not API_CLIENTS_JSON
-        and not AUTH_TOKEN_SECRET
-    ):
+    if not CLERK_JWKS_URL:
 
-        missing.append(
-            "APP_API_KEY, API_CLIENTS_JSON, or AUTH_TOKEN_SECRET"
-        )
+        missing.append("CLERK_JWKS_URL")
 
-    for database_url, database_path in {
-        (
-            AUTH_DATABASE_URL,
-            AUTH_DATABASE_PATH
-        ),
-        (
-            AUDIT_DATABASE_URL,
+    if not CLERK_ISSUER:
+
+        missing.append("CLERK_ISSUER")
+
+    if AUDIT_DATABASE_PATH:
+        Path(
             AUDIT_DATABASE_PATH
+        ).parent.mkdir(
+            parents=True,
+            exist_ok=True
         )
-    }:
-        if database_path:
-            Path(
-                database_path
-            ).parent.mkdir(
-                parents=True,
-                exist_ok=True
-            )
 
-        MigrationRunner(
-            database_url=database_url,
-            database_path=database_path
-        ).apply_pending()
+    MigrationRunner(
+        database_url=AUDIT_DATABASE_URL,
+        database_path=AUDIT_DATABASE_PATH
+    ).apply_pending()
 
     if missing:
 

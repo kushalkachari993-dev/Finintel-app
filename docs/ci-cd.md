@@ -22,6 +22,23 @@ Frontend job:
 - Installs dependencies with `npm ci`
 - Builds the React app with `npm run build`
 
+## Deployed E2E
+
+Workflow: `.github/workflows/e2e.yml`
+
+Authenticated browser checks use Clerk's official Playwright helper. Add
+these repository secrets and variable for the Clerk instance used by the
+deployed frontend:
+
+```text
+E2E_CLERK_PUBLISHABLE_KEY
+E2E_CLERK_SECRET_KEY
+E2E_CLERK_USER_EMAIL
+```
+
+`E2E_CLERK_USER_EMAIL` should identify a dedicated test account. Keep the
+Clerk secret key in GitHub Secrets; never expose it through a Vite variable.
+
 ## Render CD
 
 The Render Blueprint sets both services to:

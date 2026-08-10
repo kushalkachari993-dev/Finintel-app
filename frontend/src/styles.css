@@ -78,6 +78,17 @@ main {
   min-height: 100vh;
 }
 
+.configuration-error {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  color: var(--fi-red);
+  background: var(--fi-paper);
+  font-weight: 700;
+  text-align: center;
+}
+
 h1,
 h2,
 h3,

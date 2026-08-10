@@ -46,6 +46,9 @@ jobs:
           E2E_BACKEND_URL: ${{ vars.E2E_BACKEND_URL || 'https://finintel-ai-backend.onrender.com' }}
           E2E_RUN_LIVE_AI: ${{ github.event.inputs.run_live_ai || 'false' }}
           E2E_BACKEND_API_KEY: ${{ secrets.E2E_BACKEND_API_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.E2E_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.E2E_CLERK_SECRET_KEY }}
+          E2E_CLERK_USER_EMAIL: ${{ vars.E2E_CLERK_USER_EMAIL }}
         run: npm run test:e2e:deployed
 
       - name: Upload Playwright report

@@ -10,7 +10,6 @@ import {
 
 const BACKEND_API_URL =
   import.meta.env.VITE_BACKEND_API_URL || "http://127.0.0.1:8000";
-const APP_API_KEY = import.meta.env.VITE_APP_API_KEY || "";
 
 const EXAMPLES = [
   "What is ROE?",
@@ -104,21 +103,6 @@ const MODE_COPY: Record<
   },
 };
 
-type AuthUser = {
-  user_id: number;
-  email: string;
-  full_name: string;
-  role: string;
-};
-
-type AuthResult = {
-  success: boolean;
-  access_token?: string;
-  token_type?: string;
-  user?: AuthUser;
-  error?: string;
-};
-
 type ChatHistoryItem = {
   id: number;
   query: string;
@@ -182,13 +166,11 @@ type ChatMessage =
     };
 
 type ExternalAuth = {
-  enabled: boolean;
   isLoaded: boolean;
   isSignedIn: boolean;
   email: string;
   fullName: string;
   getToken: () => Promise<string | null>;
-  signOut: () => Promise<void>;
   controls: ReactNode;
 };
 
@@ -711,11 +693,7 @@ async function fetchAnalysis(
     "Content-Type": "application/json",
   };
 
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  } else {
-    headers["X-API-Key"] = APP_API_KEY;
-  }
+  headers.Authorization = `Bearer ${token}`;
 
   const endpoint = mode === "report" ? "report" : "chat";
 
@@ -764,11 +742,7 @@ async function fetchAnalysisStream(
     "Content-Type": "application/json",
   };
 
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  } else {
-    headers["X-API-Key"] = APP_API_KEY;
-  }
+  headers.Authorization = `Bearer ${token}`;
 
   const endpoint = mode === "report" ? "report/stream" : "chat/stream";
 
@@ -942,37 +916,6 @@ async function fetchConversationMessages(
   }
 
   return body.messages || [];
-}
-
-async function submitAuth(
-  mode: "login" | "register",
-  email: string,
-  password: string,
-  fullName: string
-): Promise<AuthResult> {
-  const response = await fetch(`${BACKEND_API_URL}/auth/${mode}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      email,
-      password,
-      full_name: fullName,
-    }),
-  });
-
-  const body = (await response.json().catch(() => null)) as AuthResult | null;
-
-  if (!response.ok) {
-    throw new Error(body?.error || `Auth failed with ${response.status}`);
-  }
-
-  if (!body?.access_token || !body.user) {
-    throw new Error("Authentication response was incomplete.");
-  }
-
-  return body;
 }
 
 async function fetchHistory(token: string): Promise<ChatHistoryItem[]> {
@@ -2401,27 +2344,18 @@ function AssistantResultMessage({
 export default function App({
   externalAuth,
 }: {
-  externalAuth?: ExternalAuth;
+  externalAuth: ExternalAuth;
 }) {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authOpen, setAuthOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [answerDetail, setAnswerDetail] = useState<AnswerDetail>("brief");
   const [workMode, setWorkMode] = useState<WorkMode>("chat");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [token, setToken] = useState(() => localStorage.getItem("finintel_token") || "");
   const [currentConversationId, setCurrentConversationId] = useState("");
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    const stored = localStorage.getItem("finintel_user");
-    return stored ? (JSON.parse(stored) as AuthUser) : null;
-  });
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [historySearch, setHistorySearch] = useState("");
   const [historyHasMore, setHistoryHasMore] = useState(false);
@@ -2431,17 +2365,13 @@ export default function App({
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteConfirmationId, setDeleteConfirmationId] = useState("");
   const deferredHistorySearch = useDeferredValue(historySearch);
-  const externalSignedIn = Boolean(
-    externalAuth?.enabled && externalAuth.isSignedIn
-  );
-  const displayedUser = externalAuth?.enabled
-    ? externalSignedIn
-      ? {
-          full_name: externalAuth.fullName,
-          email: externalAuth.email,
-        }
-      : null
-    : user;
+  const externalSignedIn = Boolean(externalAuth.isSignedIn);
+  const displayedUser = externalSignedIn
+    ? {
+        full_name: externalAuth.fullName,
+        email: externalAuth.email,
+      }
+    : null;
 
   const modeCopy = MODE_COPY[workMode];
   const modeExamples = workMode === "report" ? REPORT_EXAMPLES : EXAMPLES;
@@ -2468,15 +2398,9 @@ export default function App({
       .filter((group) => group.items.length > 0);
   }, [conversations]);
   const progressValue = progressPercent(progressEvents);
-  const authStatus = externalAuth?.enabled
-    ? externalSignedIn
-      ? "Signed in with Clerk"
-      : "Sign in to save history"
-    : token
-      ? "Signed in"
-      : APP_API_KEY
-        ? "Development API key"
-        : "Sign in required";
+  const authStatus = externalSignedIn
+    ? "Signed in with Clerk"
+    : "Sign in required";
   const mobileAuthLabel = displayedUser
     ? displayedUser.full_name.split(" ")[0]
     : "Sign in";
@@ -2604,10 +2528,7 @@ export default function App({
     let cancelled = false;
     let timer = 0;
 
-    if (
-      (externalAuth?.enabled && (!externalAuth.isLoaded || !externalAuth.isSignedIn))
-      || (!externalAuth?.enabled && !token)
-    ) {
+    if (!externalAuth.isLoaded || !externalAuth.isSignedIn) {
       setConversations([]);
       setHistoryHasMore(false);
       return;
@@ -2617,9 +2538,7 @@ export default function App({
       setHistoryLoading(true);
 
       try {
-        const authToken = externalAuth?.enabled
-          ? (await externalAuth.getToken()) || ""
-          : token;
+        const authToken = (await externalAuth.getToken()) || "";
         const page = await fetchConversations(authToken, {
           search: deferredHistorySearch,
         });
@@ -2645,63 +2564,15 @@ export default function App({
       window.clearTimeout(timer);
     };
   }, [
-    token,
     deferredHistorySearch,
-    externalAuth?.enabled,
-    externalAuth?.isLoaded,
-    externalAuth?.isSignedIn,
+    externalAuth.isLoaded,
+    externalAuth.isSignedIn,
   ]);
 
   async function currentAuthToken() {
-    if (externalAuth?.enabled) {
-      return externalAuth.isSignedIn
-        ? (await externalAuth.getToken()) || ""
-        : "";
-    }
-
-    return token;
-  }
-
-  async function handleAuth(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-
-    try {
-      const auth = await submitAuth(authMode, email.trim(), password, fullName.trim());
-      setToken(auth.access_token || "");
-      setUser(auth.user || null);
-      localStorage.setItem("finintel_token", auth.access_token || "");
-      localStorage.setItem("finintel_user", JSON.stringify(auth.user));
-      const page = await fetchConversations(auth.access_token || "");
-      setConversations(page.conversations);
-      setHistoryHasMore(page.hasMore);
-      setPassword("");
-      setAuthOpen(false);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Authentication failed.");
-    }
-  }
-
-  function logout() {
-    if (externalAuth?.enabled) {
-      externalAuth.signOut().catch(() => undefined);
-      setConversations([]);
-      setHistorySearch("");
-      setHistoryHasMore(false);
-      setCurrentConversationId("");
-      setAuthOpen(false);
-      return;
-    }
-
-    setToken("");
-    setUser(null);
-    localStorage.removeItem("finintel_token");
-    localStorage.removeItem("finintel_user");
-    setConversations([]);
-    setHistorySearch("");
-    setHistoryHasMore(false);
-    setCurrentConversationId("");
-    setAuthOpen(false);
+    return externalAuth.isSignedIn
+      ? (await externalAuth.getToken()) || ""
+      : "";
   }
 
   function selectExample(example: string) {
@@ -2821,8 +2692,8 @@ export default function App({
 
     const authToken = await currentAuthToken();
 
-    if (!authToken && !APP_API_KEY) {
-      setError("Please login or configure a development API key before asking FinIntel.");
+    if (!authToken) {
+      setError("Please sign in with Clerk before asking FinIntel.");
       setAuthOpen(true);
       return;
     }
@@ -3323,89 +3194,19 @@ export default function App({
               </p>
             </div>
 
-            <form className="auth-card auth-card-modal" onSubmit={handleAuth}>
-              {externalAuth?.enabled ? (
-                <>
-                  {externalAuth.isLoaded && externalSignedIn ? (
-                    <div className="account-summary">
-                      <strong>{externalAuth.fullName}</strong>
-                      <small>{externalAuth.email}</small>
-                    </div>
-                  ) : (
-                    <small>Use your Clerk account to save history.</small>
-                  )}
-                  {externalAuth.controls}
-                </>
-              ) : user ? (
-                <>
-                  <div className="account-summary">
-                    <strong>{user.full_name}</strong>
-                    <small>{user.email}</small>
-                  </div>
-                  <button type="button" onClick={logout}>
-                    Sign out
-                  </button>
-                </>
+            <div className="auth-card auth-card-modal">
+              {externalAuth.isLoaded && externalSignedIn ? (
+                <div className="account-summary">
+                  <strong>{externalAuth.fullName}</strong>
+                  <small>{externalAuth.email}</small>
+                </div>
               ) : (
                 <>
-                  <div className="auth-tabs">
-                    <button
-                      className={authMode === "login" ? "active" : ""}
-                      type="button"
-                      onClick={() => setAuthMode("login")}
-                    >
-                      Login
-                    </button>
-                    <button
-                      className={authMode === "register" ? "active" : ""}
-                      type="button"
-                      onClick={() => setAuthMode("register")}
-                    >
-                      Register
-                    </button>
-                  </div>
-                  {authMode === "register" && (
-                    <>
-                      <label className="sr-only" htmlFor="auth-full-name">
-                        Full name
-                      </label>
-                      <input
-                        id="auth-full-name"
-                        value={fullName}
-                        onChange={(event) => setFullName(event.target.value)}
-                        placeholder="Full name"
-                        autoComplete="name"
-                      />
-                    </>
-                  )}
-                  <label className="sr-only" htmlFor="auth-email">
-                    Email
-                  </label>
-                  <input
-                    id="auth-email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="Email"
-                    type="email"
-                    autoComplete="email"
-                  />
-                  <label className="sr-only" htmlFor="auth-password">
-                    Password
-                  </label>
-                  <input
-                    id="auth-password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="Password"
-                    type="password"
-                    autoComplete={authMode === "login" ? "current-password" : "new-password"}
-                  />
-                  <button type="submit">
-                    {authMode === "login" ? "Login" : "Create account"}
-                  </button>
+                  <small>Use your Clerk account to save history.</small>
                 </>
               )}
-            </form>
+              {externalAuth.controls}
+            </div>
           </section>
         </div>
       )}

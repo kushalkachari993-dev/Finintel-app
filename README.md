@@ -74,24 +74,19 @@ Copy `.env.example` to `.env` and set:
 - `APP_API_KEY`
 - `API_CLIENTS_JSON` optional for multiple API clients
 - `DATABASE_URL` optional, defaults to `sqlite:///data/finintel.sqlite3`
-- `AUTH_DATABASE_PATH` optional legacy override
 - `AUDIT_DATABASE_PATH` optional legacy override
-- `AUTH_TOKEN_SECRET`
-- `AUTH_TOKEN_EXPIRE_MINUTES` optional
+- `CLERK_JWKS_URL` required for Clerk session JWT verification
+- `CLERK_ISSUER` required for Clerk JWT issuer validation
+- `CLERK_AUDIENCE` optional Clerk JWT audience validation
 
-For the React app, set these in `frontend/.env` when using Sentry:
+For the React app, set `VITE_CLERK_PUBLISHABLE_KEY` and the optional
+Sentry values in `frontend/.env`:
 
+- `VITE_CLERK_PUBLISHABLE_KEY`
 - `VITE_SENTRY_DSN`
 - `VITE_APP_ENV`
 - `VITE_APP_RELEASE`
 - `VITE_SENTRY_TRACES_SAMPLE_RATE`
-- `AUTH_ALLOW_REGISTRATION` optional
-- `AUTH_EMAIL_VERIFICATION_TOKEN_MINUTES` optional
-- `AUTH_PASSWORD_RESET_TOKEN_MINUTES` optional
-- `AUTH_INITIAL_ADMIN_EMAILS` optional
-- `CLERK_JWKS_URL` optional for Clerk session JWT verification
-- `CLERK_ISSUER` optional for Clerk JWT issuer validation
-- `CLERK_AUDIENCE` optional for Clerk JWT audience validation
 - `RATE_LIMIT_PER_MINUTE` optional
 - `CHAT_EXECUTION_TIMEOUT_SECONDS` optional
 - `EXTERNAL_CALL_TIMEOUT_SECONDS` optional
@@ -122,14 +117,19 @@ uv run python -m compileall backend frontend testing.py
 ## Database Migrations
 
 SQLite schema changes are versioned in `backend/storage/migrations`.
-Startup applies any pending migrations to the configured auth/audit
-database paths.
+Startup applies any pending migrations to the configured audit database.
 
 The current migrations are:
 
 - `001_create_users.sql`
 - `002_create_chat_audit.sql`
 - `003_add_auth_controls.sql`
+- `004_add_chat_response_payload.sql`
+- `005_create_chat_conversations.sql`
+- `006_add_conversation_organization.sql`
+
+The user/auth migrations are retained as immutable migration history, but
+the application no longer reads or writes those local account tables.
 
 For future schema changes, add a new numbered SQL file instead of
 editing old migrations, for example:
@@ -141,16 +141,18 @@ editing old migrations, for example:
 
 ## API Security
 
-`/chat` requires an API key:
+The React frontend authenticates `/chat`, `/report`, and history requests
+with a Clerk bearer token. API keys are reserved for legacy Streamlit and
+other explicitly configured server-to-server clients:
 
 ```http
 X-API-Key: your_app_api_key
 ```
 
-Streamlit reads `APP_API_KEY` from the environment and sends this
-header automatically. If the key is missing or invalid, the backend
-returns `401`. If a client exceeds `RATE_LIMIT_PER_MINUTE`, it returns
-`429`.
+Streamlit reads `APP_API_KEY` from the environment and sends this header
+automatically. The React build does not receive an API key. Invalid or
+missing credentials return `401`; exceeding `RATE_LIMIT_PER_MINUTE`
+returns `429`.
 
 For multiple clients, prefer `API_CLIENTS_JSON` with SHA-256 key hashes:
 
@@ -168,38 +170,12 @@ For multiple clients, prefer `API_CLIENTS_JSON` with SHA-256 key hashes:
 
 `APP_API_KEY` still works as a single default client for local setup.
 
-## User Login
-
-The React frontend can use user accounts instead of exposing an API key
-in the browser. The backend provides:
-
-- `POST /auth/register`
-- `POST /auth/login`
-- `GET /auth/me`
-- `POST /auth/verify-email`
-- `POST /auth/password-reset/request`
-- `POST /auth/password-reset/confirm`
-- `GET /admin/users` admin only
-- `PATCH /admin/users/{user_id}` admin only
-
-Users are stored in the configured SQLite database. By default the app
-uses `DATABASE_URL=sqlite:///data/finintel.sqlite3`, so users and chat
-history share one local database file. `AUTH_DATABASE_PATH` remains
-available as a legacy override. Passwords are stored with PBKDF2 hashes,
-and access tokens are signed with `AUTH_TOKEN_SECRET`.
-
-For local development, registration and password reset responses include
-`dev_email_verification_token` or `dev_password_reset_token`. In
-production, plug these tokens into an email provider instead of exposing
-them to the client.
-
-Set `AUTH_INITIAL_ADMIN_EMAILS` to a comma-separated list of emails to
-promote matching users to admin on startup.
-
 ## Clerk Auth
 
-Clerk can be enabled as an external auth provider while keeping local
-auth and API-key auth as fallbacks.
+Clerk is the only user account provider. The application does not expose
+local registration, login, email-verification, password-reset, or local
+user-administration endpoints. Clerk's hosted sign-in flow handles these
+account operations, including password recovery.
 
 Frontend:
 
@@ -215,15 +191,17 @@ CLERK_ISSUER=https://...
 CLERK_AUDIENCE=
 ```
 
-When Clerk is configured, the React app uses Clerk's hosted sign-in and
-sign-up UI. The frontend sends the Clerk session token as:
+The React app uses Clerk's hosted sign-in and sign-up UI. The frontend
+sends the Clerk session token as:
 
 ```http
 Authorization: Bearer <clerk_session_token>
 ```
 
 FastAPI verifies the token and uses `clerk:<user_id>` as the chat
-principal, so chat history remains isolated per Clerk user.
+principal, so chat history remains isolated per Clerk user. `GET /auth/me`
+returns the verified Clerk profile. API keys remain available only for
+legacy Streamlit and explicitly configured server-to-server clients.
 
 ## Observability
 
@@ -238,10 +216,10 @@ average latency, alert messages, and recent traces.
 
 ## Chat Audit & History
 
-Chat requests are persisted to the configured SQLite database. By
-default this is the same `DATABASE_URL=sqlite:///data/finintel.sqlite3`
-file used for users. `AUDIT_DATABASE_PATH` remains available as a legacy
-override. Stored fields include principal id, query, route, routing
+Chat requests are persisted to the configured database. By default this
+is `DATABASE_URL=sqlite:///data/finintel.sqlite3`. `AUDIT_DATABASE_PATH`
+remains available as a legacy override. Stored fields include principal
+id, query, route, routing
 metadata, query intelligence, response status/error, confidence score,
 latency, and timestamp.
 

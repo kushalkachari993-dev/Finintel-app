@@ -45,6 +45,7 @@ class ClerkAuthenticator:
     def enabled(self) -> bool:
         return bool(
             self.jwks_url
+            and self.issuer
         )
 
     @cached_property
@@ -145,7 +146,7 @@ class ClerkAuthenticator:
             token
         )
 
-        if not claims:
+        if not claims or not claims.get("sub"):
             return None
 
         return self.user_from_claims(

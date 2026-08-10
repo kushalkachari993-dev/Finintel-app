@@ -38,13 +38,11 @@ function ClerkApp() {
   return (
     <App
       externalAuth={{
-        enabled: true,
         isLoaded: auth.isLoaded,
         isSignedIn: Boolean(auth.isSignedIn),
         email: user?.primaryEmailAddress?.emailAddress || "",
         fullName: user?.fullName || user?.primaryEmailAddress?.emailAddress || "Clerk user",
         getToken: auth.getToken,
-        signOut: auth.signOut,
         controls: (
           <>
             <SignedOut>
@@ -75,7 +73,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <ClerkApp />
         </ClerkProvider>
       ) : (
-        <App />
+        <main className="configuration-error" role="alert">
+          Authentication is temporarily unavailable.
+        </main>
       )}
     </Sentry.ErrorBoundary>
   </React.StrictMode>

@@ -22,6 +22,7 @@
     "vite": "^7.0.0"
   },
   "devDependencies": {
+    "@clerk/testing": "^2.2.19",
     "@playwright/test": "^1.60.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6"
