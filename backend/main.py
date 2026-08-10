@@ -583,9 +583,52 @@ def conversation_context_for_request(
     ]
 
 
+def is_follow_up_query(
+    query: str
+) -> bool:
+
+    words = {
+        word.strip(".,?!:;").lower()
+        for word in query.split()
+    }
+    query_lower = query.lower()
+    normalized_query = " ".join(
+        word.strip(".,?!:;").lower()
+        for word in query.split()
+    )
+    pronoun_terms = set(
+        FOLLOW_UP_TERMS
+    )
+
+    if re.search(
+        r"\bit\s+(stocks?|sector|companies|shares?)\b",
+        query_lower
+    ):
+
+        pronoun_terms.discard(
+            "it"
+        )
+
+    return (
+        bool(
+            words & pronoun_terms
+        )
+        or normalized_query in TERSE_FOLLOW_UP_QUERIES
+        or any(
+            re.search(
+                pattern,
+                query_lower
+            )
+            for pattern in FOLLOW_UP_PATTERNS
+        )
+    )
+
+
 def context_companies(
     context: list[ConversationContextMessage]
 ) -> list[str]:
+
+    collected: list[str] = []
 
     for message in reversed(
         context
@@ -594,7 +637,7 @@ def context_companies(
 
             continue
 
-        companies = (
+        message_companies = (
             query_intelligence
             .symbol_registry
             .extract_company_names(
@@ -602,11 +645,22 @@ def context_companies(
             )
         )
 
-        if companies:
+        if message_companies:
 
-            return companies
+            collected = list(
+                dict.fromkeys(
+                    message_companies
+                    + collected
+                )
+            )
 
-    return []
+        if not is_follow_up_query(
+            message.content
+        ):
+
+            break
+
+    return collected
 
 
 def join_companies(
@@ -806,43 +860,9 @@ def contextual_query(
 
         return query
 
-    words = {
-        word.strip(".,?!:;").lower()
-        for word in query.split()
-    }
-    query_lower = query.lower()
-    normalized_query = " ".join(
-        word.strip(".,?!:;").lower()
-        for word in query.split()
-    )
-    pronoun_terms = set(
-        FOLLOW_UP_TERMS
-    )
-
-    if re.search(
-        r"\bit\s+(stocks?|sector|companies|shares?)\b",
-        query_lower
+    if not is_follow_up_query(
+        query
     ):
-
-        pronoun_terms.discard(
-            "it"
-        )
-
-    looks_like_follow_up = (
-        bool(
-            words & pronoun_terms
-        )
-        or normalized_query in TERSE_FOLLOW_UP_QUERIES
-        or any(
-            re.search(
-                pattern,
-                query_lower
-            )
-            for pattern in FOLLOW_UP_PATTERNS
-        )
-    )
-
-    if not looks_like_follow_up:
 
         return query
 

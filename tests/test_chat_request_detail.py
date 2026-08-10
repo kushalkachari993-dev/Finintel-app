@@ -148,6 +148,22 @@ def test_contextual_comparison_does_not_leak_answer_fields():
                     '{"sector":"Technology","industry":"Communication '
                     'and Media"}'
                 )
+            ),
+            ConversationContextMessage(
+                role="user",
+                content="compare it with infosys and wipro."
+            ),
+            ConversationContextMessage(
+                role="error",
+                content="Request timed out while waiting for providers."
+            ),
+            ConversationContextMessage(
+                role="user",
+                content="compare it with infosys and wipro."
+            ),
+            ConversationContextMessage(
+                role="error",
+                content="Streaming response ended before a final answer."
             )
         ]
     )
