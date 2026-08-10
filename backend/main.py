@@ -583,6 +583,220 @@ def conversation_context_for_request(
     ]
 
 
+def context_companies(
+    context: list[ConversationContextMessage]
+) -> list[str]:
+
+    for message in reversed(
+        context
+    ):
+        if message.role != "user":
+
+            continue
+
+        companies = (
+            query_intelligence
+            .symbol_registry
+            .extract_company_names(
+                message.content
+            )
+        )
+
+        if companies:
+
+            return companies
+
+    return []
+
+
+def join_companies(
+    companies: list[str]
+) -> str:
+
+    if len(companies) == 1:
+
+        return companies[0]
+
+    if len(companies) == 2:
+
+        return f"{companies[0]} and {companies[1]}"
+
+    return (
+        ", ".join(
+            companies[:-1]
+        )
+        + f", and {companies[-1]}"
+    )
+
+
+def standalone_follow_up_query(
+    query: str,
+    context: list[ConversationContextMessage]
+) -> str:
+
+    companies = context_companies(
+        context
+    )
+    current_companies = (
+        query_intelligence
+        .symbol_registry
+        .extract_company_names(
+            query
+        )
+    )
+    normalized_query = " ".join(
+        word.strip(".,?!:;").lower()
+        for word in query.split()
+    )
+
+    if companies and re.search(
+        r"\b(?:compare|vs|versus)\b",
+        query,
+        flags=re.IGNORECASE
+    ):
+        comparison_companies = list(
+            dict.fromkeys(
+                companies
+                + current_companies
+            )
+        )
+
+        if len(comparison_companies) >= 2:
+
+            return (
+                "Compare "
+                + join_companies(
+                    comparison_companies
+                )
+            )
+
+    if companies and re.match(
+        r"^\s*(?:and|what about|how about)\b",
+        query,
+        flags=re.IGNORECASE
+    ) and current_companies:
+        comparison_companies = list(
+            dict.fromkeys(
+                companies
+                + current_companies
+            )
+        )
+
+        return (
+            "Compare "
+            + join_companies(
+                comparison_companies
+            )
+        )
+
+    if companies:
+        subject = join_companies(
+            companies
+        )
+        primary = companies[0]
+        plural_possessive = (
+            f"{subject}'"
+            if subject.endswith("s")
+            else f"{subject}'s"
+        )
+        replacements = (
+            (r"\bformer\b", companies[0]),
+            (
+                r"\blatter\b",
+                companies[1]
+                if len(companies) > 1
+                else primary
+            ),
+            (r"\b(?:both|they|them|these|those)\b", subject),
+            (r"\btheir\b", plural_possessive),
+            (r"\bits\b", f"{primary}'s"),
+            (r"\bitself\b", primary),
+            (
+                r"\b(?:it|this company|that company|the company)\b",
+                primary
+            )
+        )
+        resolved_query = query
+
+        for pattern, replacement in replacements:
+            resolved_query = re.sub(
+                pattern,
+                replacement,
+                resolved_query,
+                flags=re.IGNORECASE
+            )
+
+        if resolved_query != query:
+
+            return resolved_query
+
+        topic_match = re.match(
+            r"^\s*(?:and|what about|how about)\s+(.+?)[?.!]*$",
+            query,
+            flags=re.IGNORECASE
+        )
+
+        if topic_match:
+
+            return (
+                f"Analyze {topic_match.group(1).strip()} "
+                f"for {subject}"
+            )
+
+        if normalized_query in TERSE_FOLLOW_UP_QUERIES:
+
+            if normalized_query in {
+                "why",
+                "why not",
+                "how so"
+            }:
+
+                return f"Explain the reasoning for {subject}"
+
+            if normalized_query in {
+                "more",
+                "more details",
+                "explain",
+                "elaborate",
+                "continue",
+                "go on"
+            }:
+
+                return f"Provide more details about {subject}"
+
+            if normalized_query in {
+                "source",
+                "sources"
+            }:
+
+                return f"Show the sources for {subject}"
+
+            return f"Analyze {normalized_query} for {subject}"
+
+        return f"{query.rstrip()} regarding {subject}"
+
+    previous_user_query = next(
+        (
+            message.content.strip()
+            for message in reversed(
+                context
+            )
+            if message.role == "user"
+            and message.content.strip()
+        ),
+        ""
+    )
+
+    if previous_user_query:
+
+        return (
+            f"{query.rstrip()} regarding the previous topic: "
+            f"{previous_user_query.lower()}"
+        )
+
+    return query
+
+
 def contextual_query(
     query: str,
     context: list[ConversationContextMessage]
@@ -632,21 +846,9 @@ def contextual_query(
 
         return query
 
-    recent_context = "\n".join(
-        f"{message.role}: {message.content}"
-        for message in context[-6:]
-        if message.content.strip()
-    )
-
-    if not recent_context:
-
-        return query
-
-    return (
-        "Conversation context:\n"
-        f"{recent_context}\n\n"
-        "Current question:\n"
-        f"{query}"
+    return standalone_follow_up_query(
+        query,
+        context[-6:]
     )
 
 

@@ -154,6 +154,15 @@ QUERY:
                 output
             ).strip()
 
+            if not output:
+
+                logger.warning(
+                    "company_name_extraction_empty query=%r",
+                    query
+                )
+
+                return None
+
             parsed = json.loads(output)
 
             company_name = parsed.get(

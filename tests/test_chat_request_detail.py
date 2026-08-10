@@ -52,9 +52,7 @@ def test_contextual_query_expands_short_follow_up():
         ]
     )
 
-    assert "Conversation context" in expanded
-    assert "Analyze TCS fundamentals" in expanded
-    assert "compare it with Infosys" in expanded
+    assert expanded == "Compare TCS and Infosys"
 
 
 def test_contextual_query_leaves_standalone_query_unchanged():
@@ -96,8 +94,7 @@ def test_contextual_query_expands_natural_follow_up():
         ]
     )
 
-    assert "Analyze Reliance Industries" in expanded
-    assert "What about its debt trend?" in expanded
+    assert expanded == "What about Reliance Industries's debt trend?"
 
 
 def test_contextual_query_leaves_short_unrelated_question_unchanged():
@@ -133,8 +130,47 @@ def test_contextual_query_expands_terse_follow_up(query):
         ]
     )
 
-    assert "Analyze TCS fundamentals" in expanded
-    assert query in expanded
+    assert "TCS" in expanded
+    assert "Conversation context" not in expanded
+
+
+def test_contextual_comparison_does_not_leak_answer_fields():
+    expanded = contextual_query(
+        "compare it with infosys and wipro.",
+        [
+            ConversationContextMessage(
+                role="user",
+                content="tell me about tcs."
+            ),
+            ConversationContextMessage(
+                role="assistant",
+                content=(
+                    '{"sector":"Technology","industry":"Communication '
+                    'and Media"}'
+                )
+            )
+        ]
+    )
+
+    assert expanded == (
+        "Compare TCS, Infosys, and Wipro"
+    )
+    assert "Technology" not in expanded
+    assert "Communication" not in expanded
+    assert main.query_intelligence.extract(
+        expanded
+    )["companies"] == [
+        "TCS",
+        "Infosys",
+        "Wipro"
+    ]
+    assert main.comparison_agent.extract_companies(
+        expanded
+    ) == [
+        "TCS",
+        "Infosys",
+        "Wipro"
+    ]
 
 
 def test_response_context_text_serializes_structured_answer():
