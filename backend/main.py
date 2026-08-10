@@ -428,7 +428,11 @@ FOLLOW_UP_TERMS = {
 FOLLOW_UP_PATTERNS = (
     r"^\s*(?:and|also|then)\b",
     r"\b(?:what|how)\s+about\b",
+    r"\bwhich\s+(?:one|company|stock)\b",
     r"\b(?:tell|show|give)\s+me\s+more\b",
+    r"\b(?:explain|tell me)\s+(?:why|how)\b",
+    r"\b(?:you|your)\s+(?:said|mentioned|stated|concluded|answer|analysis)\b",
+    r"\bbased\s+on\s+(?:that|this|your|the previous)\b",
     r"\bexplain\s+(?:that|this|it)\b",
     r"\b(?:more|further)\s+(?:detail|details|information|analysis)\b",
     r"\b(?:instead|alternatively)\b"
@@ -458,6 +462,8 @@ TERSE_FOLLOW_UP_QUERIES = {
 
 CONVERSATION_CONTEXT_MESSAGE_LIMIT = 8
 CONVERSATION_CONTEXT_CONTENT_LIMIT = 2000
+GENERATION_CONTEXT_MESSAGE_LIMIT = 6
+GENERATION_CONTEXT_TOTAL_LIMIT = 6000
 
 
 def response_context_text(
@@ -581,6 +587,60 @@ def conversation_context_for_request(
     return client_context[
         -CONVERSATION_CONTEXT_MESSAGE_LIMIT:
     ]
+
+
+def build_generation_context(
+    context: list[ConversationContextMessage]
+) -> str:
+
+    blocks: list[str] = []
+    remaining = GENERATION_CONTEXT_TOTAL_LIMIT
+
+    for message in reversed(
+        context[-GENERATION_CONTEXT_MESSAGE_LIMIT:]
+    ):
+        if message.role not in {
+            "user",
+            "assistant"
+        }:
+
+            continue
+
+        content = message.content.strip()
+
+        if not content:
+
+            continue
+
+        label = (
+            "USER"
+            if message.role == "user"
+            else "ASSISTANT"
+        )
+        prefix = f"{label}: "
+        available = remaining - len(
+            prefix
+        ) - 1
+
+        if available <= 0:
+
+            break
+
+        block = prefix + content[
+            :available
+        ]
+        blocks.append(
+            block
+        )
+        remaining -= len(
+            block
+        ) + 1
+
+    return "\n".join(
+        reversed(
+            blocks
+        )
+    )
 
 
 def is_follow_up_query(
@@ -754,6 +814,10 @@ def standalone_follow_up_query(
             else f"{subject}'s"
         )
         replacements = (
+            (
+                r"\bwhich\s+(?:one|company|stock)\b",
+                f"which of {subject}"
+            ),
             (r"\bformer\b", companies[0]),
             (
                 r"\blatter\b",
@@ -1352,6 +1416,15 @@ async def chat(
         user_query,
         conversation_context
     )
+    llm_conversation_context = (
+        build_generation_context(
+            conversation_context
+        )
+        if is_follow_up_query(
+            user_query
+        )
+        else ""
+    )
 
     # ---------------------------------------------------
     # QUERY INTELLIGENCE
@@ -1416,6 +1489,7 @@ async def chat(
                 intelligence=intelligence,
                 model=selected_model,
                 answer_detail=answer_detail,
+                conversation_context=llm_conversation_context,
                 timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
             )
 
@@ -1444,6 +1518,7 @@ async def chat(
                 intelligence=intelligence,
                 model=selected_model,
                 answer_detail=answer_detail,
+                conversation_context=llm_conversation_context,
                 timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
             )
 
@@ -1458,6 +1533,7 @@ async def chat(
                 analysis_query,
                 model=selected_model,
                 answer_detail=answer_detail,
+                conversation_context=llm_conversation_context,
                 timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
             )
 
@@ -1473,6 +1549,7 @@ async def chat(
                 intelligence=intelligence,
                 model=selected_model,
                 answer_detail=answer_detail,
+                conversation_context=llm_conversation_context,
                 timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
             )
 
@@ -1488,6 +1565,7 @@ async def chat(
                 intelligence=intelligence,
                 model=selected_model,
                 answer_detail=answer_detail,
+                conversation_context=llm_conversation_context,
                 timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
             )
 
@@ -1502,6 +1580,7 @@ async def chat(
                 analysis_query,
                 model=selected_model,
                 answer_detail=answer_detail,
+                conversation_context=llm_conversation_context,
                 timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
             )
 
@@ -1948,6 +2027,15 @@ async def report(
         user_query,
         conversation_context
     )
+    llm_conversation_context = (
+        build_generation_context(
+            conversation_context
+        )
+        if is_follow_up_query(
+            user_query
+        )
+        else ""
+    )
 
     intelligence = await run_blocking(
         query_intelligence.extract,
@@ -1973,6 +2061,7 @@ async def report(
             query=analysis_query,
             intelligence=intelligence,
             model=selected_model,
+            conversation_context=llm_conversation_context,
             timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
         )
         response = apply_financial_guardrails(

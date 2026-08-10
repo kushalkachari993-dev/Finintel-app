@@ -19,7 +19,8 @@ from backend.schemas.educational_schema import (
 )
 from backend.agents.detail_guidance import (
     answer_detail_guidance,
-    answer_detail_tokens
+    answer_detail_tokens,
+    conversation_context_guidance
 )
 from backend.utils.provider_errors import (
     safe_provider_error
@@ -48,7 +49,8 @@ class EducationalAgent:
         self,
         query: str,
         model: str | None = None,
-        answer_detail: str = "brief"
+        answer_detail: str = "brief",
+        conversation_context: str = ""
     ):
 
         rag_results = []
@@ -111,6 +113,9 @@ Explain this finance concept.
 
 QUERY:
 {query}
+
+PRIOR CONVERSATION CONTEXT:
+{conversation_context_guidance(conversation_context)}
 
 RAG CONTEXT:
 {rag_context if rag_context else "No relevant RAG context retrieved."}

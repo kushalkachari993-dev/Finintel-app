@@ -26,7 +26,8 @@ from backend.utils.confidence_engine import (
 )
 from backend.agents.detail_guidance import (
     answer_detail_guidance,
-    answer_detail_tokens
+    answer_detail_tokens,
+    conversation_context_guidance
 )
 from backend.utils.provider_errors import (
     is_provider_error_text,
@@ -312,7 +313,8 @@ class DiscoveryAgent:
         query: str,
         intelligence: dict = None,
         model: str | None = None,
-        answer_detail: str = "brief"
+        answer_detail: str = "brief",
+        conversation_context: str = ""
     ):
 
         # ---------------------------------------------------
@@ -528,6 +530,9 @@ IMPORTANT RULES:
 
 USER QUERY:
 {query}
+
+PRIOR CONVERSATION CONTEXT:
+{conversation_context_guidance(conversation_context)}
 
 QUERY INTELLIGENCE:
 

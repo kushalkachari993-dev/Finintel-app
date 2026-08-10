@@ -183,3 +183,4 @@ async def test_report_endpoint_preserves_conversation_context(monkeypatch):
     )
 
     assert captured["query"] == "make Infosys detailed"
+    assert "USER: Tell me about Infosys" in captured["conversation_context"]

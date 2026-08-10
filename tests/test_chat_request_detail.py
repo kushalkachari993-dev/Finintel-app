@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from backend import main
 from backend.main import ChatRequest
 from backend.main import ConversationContextMessage
+from backend.main import build_generation_context
 from backend.main import conversation_context_for_request
 from backend.main import contextual_query
 from backend.main import response_context_text
@@ -189,6 +190,142 @@ def test_contextual_comparison_does_not_leak_answer_fields():
     ]
 
 
+def test_contextual_query_resolves_which_one_follow_up():
+    expanded = contextual_query(
+        "Which one has better margins?",
+        [
+            ConversationContextMessage(
+                role="user",
+                content="Compare TCS and Infosys"
+            )
+        ]
+    )
+
+    assert expanded == (
+        "which of TCS and Infosys has better margins?"
+    )
+
+
+def test_generation_context_preserves_previous_answer():
+    context = build_generation_context(
+        [
+            ConversationContextMessage(
+                role="user",
+                content="Analyze TCS"
+            ),
+            ConversationContextMessage(
+                role="assistant",
+                content=(
+                    '{"overall_view":"TCS margins are stronger, but its '
+                    'valuation is elevated."}'
+                )
+            )
+        ]
+    )
+
+    assert "USER: Analyze TCS" in context
+    assert "ASSISTANT:" in context
+    assert "valuation is elevated" in context
+
+
+def test_explicit_previous_answer_reference_uses_context():
+    expanded = contextual_query(
+        "You said valuation was elevated. Can you explain why?",
+        [
+            ConversationContextMessage(
+                role="user",
+                content="Analyze TCS"
+            ),
+            ConversationContextMessage(
+                role="assistant",
+                content="TCS valuation appears elevated relative to growth."
+            )
+        ]
+    )
+
+    assert expanded == (
+        "You said valuation was elevated. Can you explain why? regarding TCS"
+    )
+
+
+@pytest.mark.anyio
+async def test_chat_separates_routing_query_from_generation_context(
+    monkeypatch
+):
+    captured = {}
+
+    def extract(query):
+        captured["intelligence_query"] = query
+        return {
+            "intent": "FUNDAMENTAL",
+            "companies": ["TCS"]
+        }
+
+    def route(query, intelligence=None):
+        captured["routing_query"] = query
+        return {
+            "route": "FUNDAMENTAL",
+            "confidence": 0.95,
+            "reasoning": "Mocked contextual route."
+        }
+
+    def analyze(query, **kwargs):
+        captured["agent_query"] = query
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "data": {
+                "company_name": "TCS",
+                "ticker": "TCS.NS",
+                "overall_view": "Current analysis",
+                "confidence_score": 0.8
+            },
+            "error": None
+        }
+
+    monkeypatch.setattr(
+        main.query_intelligence,
+        "extract",
+        extract
+    )
+    monkeypatch.setattr(
+        main.router_agent,
+        "route",
+        route
+    )
+    monkeypatch.setattr(
+        main.fundamental_agent,
+        "analyze",
+        analyze
+    )
+
+    result = await main.chat(
+        request=ChatRequest(
+            query="Why?",
+            conversation_context=[
+                {
+                    "role": "user",
+                    "content": "Analyze TCS"
+                },
+                {
+                    "role": "assistant",
+                    "content": "TCS margins were strong but valuation was elevated."
+                }
+            ]
+        ),
+        http_request=SimpleNamespace(
+            state=SimpleNamespace()
+        )
+    )
+
+    assert result["success"] is True
+    assert captured["agent_query"] == "Explain the reasoning for TCS"
+    assert captured["intelligence_query"] == captured["agent_query"]
+    assert captured["routing_query"] == captured["agent_query"]
+    assert "valuation was elevated" not in captured["routing_query"]
+    assert "valuation was elevated" in captured["conversation_context"]
+
+
 def test_response_context_text_serializes_structured_answer():
     text = response_context_text(
         {
@@ -313,3 +450,4 @@ async def test_chat_passes_detailed_mode_to_route_agent(monkeypatch):
     )
 
     assert captured["answer_detail"] == "detailed"
+    assert captured["conversation_context"] == ""

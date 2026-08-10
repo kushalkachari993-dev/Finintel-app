@@ -13,6 +13,7 @@ from backend.tools.ticker_resolver import TickerResolver
 from backend.utils.confidence_engine import ConfidenceEngine
 from backend.utils.json_parser import JSONParser
 from backend.utils.provider_errors import is_provider_error_text
+from backend.agents.detail_guidance import conversation_context_guidance
 
 
 logger = logging.getLogger(__name__)
@@ -394,7 +395,8 @@ class ReportAgent:
         self,
         query: str,
         intelligence: dict | None = None,
-        model: str | None = None
+        model: str | None = None,
+        conversation_context: str = ""
     ):
 
         intelligence = intelligence or {}
@@ -492,6 +494,9 @@ Rules:
 
 User query:
 {query}
+
+Prior conversation context:
+{conversation_context_guidance(conversation_context)}
 
 Query intelligence:
 {json.dumps(intelligence, indent=2, default=str)}
