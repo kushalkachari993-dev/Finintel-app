@@ -406,17 +406,181 @@ class ConversationUpdateRequest(BaseModel):
 
 FOLLOW_UP_TERMS = {
     "it",
+    "its",
+    "itself",
     "this",
     "that",
     "these",
     "those",
     "them",
     "they",
+    "their",
+    "theirs",
+    "both",
+    "former",
+    "latter",
     "same",
     "above",
     "previous",
     "earlier"
 }
+
+FOLLOW_UP_PATTERNS = (
+    r"^\s*(?:and|also|then)\b",
+    r"\b(?:what|how)\s+about\b",
+    r"\b(?:tell|show|give)\s+me\s+more\b",
+    r"\bexplain\s+(?:that|this|it)\b",
+    r"\b(?:more|further)\s+(?:detail|details|information|analysis)\b",
+    r"\b(?:instead|alternatively)\b"
+)
+
+TERSE_FOLLOW_UP_QUERIES = {
+    "why",
+    "why not",
+    "how so",
+    "explain",
+    "elaborate",
+    "continue",
+    "go on",
+    "more",
+    "more details",
+    "source",
+    "sources",
+    "risks",
+    "what risks",
+    "valuation",
+    "outlook",
+    "debt",
+    "margins",
+    "growth",
+    "dividends"
+}
+
+CONVERSATION_CONTEXT_MESSAGE_LIMIT = 8
+CONVERSATION_CONTEXT_CONTENT_LIMIT = 2000
+
+
+def response_context_text(
+    response: dict | None
+) -> str:
+
+    if not isinstance(response, dict):
+
+        return ""
+
+    value = response.get(
+        "data"
+    )
+
+    if value is None:
+
+        value = response.get(
+            "error"
+        )
+
+    if value is None:
+
+        return ""
+
+    if isinstance(value, str):
+
+        text = value
+
+    else:
+
+        text = json.dumps(
+            value,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":")
+        )
+
+    return text.strip()[
+        :CONVERSATION_CONTEXT_CONTENT_LIMIT
+    ]
+
+
+def stored_conversation_context(
+    *,
+    principal_id: str,
+    conversation_id: str
+) -> list[ConversationContextMessage]:
+
+    messages = chat_audit_store.list_messages(
+        principal_id=principal_id,
+        conversation_id=conversation_id
+    )
+    context: list[ConversationContextMessage] = []
+
+    for message in messages[
+        -CONVERSATION_CONTEXT_MESSAGE_LIMIT:
+    ]:
+        role = message.get(
+            "role"
+        )
+        content = str(
+            message.get(
+                "content"
+            ) or ""
+        ).strip()
+
+        if role == "assistant":
+            payload = message.get(
+                "payload"
+            )
+            response = (
+                payload.get(
+                    "response"
+                )
+                if isinstance(payload, dict)
+                else None
+            )
+            content = (
+                response_context_text(
+                    response
+                )
+                or content
+            )
+
+        if role not in {
+            "user",
+            "assistant",
+            "error"
+        } or not content:
+
+            continue
+
+        context.append(
+            ConversationContextMessage(
+                role=role,
+                content=content[
+                    :CONVERSATION_CONTEXT_CONTENT_LIMIT
+                ]
+            )
+        )
+
+    return context
+
+
+def conversation_context_for_request(
+    *,
+    principal_id: str,
+    conversation_id: str,
+    client_context: list[ConversationContextMessage]
+) -> list[ConversationContextMessage]:
+
+    stored_context = stored_conversation_context(
+        principal_id=principal_id,
+        conversation_id=conversation_id
+    )
+
+    if stored_context:
+
+        return stored_context
+
+    return client_context[
+        -CONVERSATION_CONTEXT_MESSAGE_LIMIT:
+    ]
 
 
 def contextual_query(
@@ -433,6 +597,10 @@ def contextual_query(
         for word in query.split()
     }
     query_lower = query.lower()
+    normalized_query = " ".join(
+        word.strip(".,?!:;").lower()
+        for word in query.split()
+    )
     pronoun_terms = set(
         FOLLOW_UP_TERMS
     )
@@ -447,9 +615,16 @@ def contextual_query(
         )
 
     looks_like_follow_up = (
-        len(words) <= 4
-        or bool(
+        bool(
             words & pronoun_terms
+        )
+        or normalized_query in TERSE_FOLLOW_UP_QUERIES
+        or any(
+            re.search(
+                pattern,
+                query_lower
+            )
+            for pattern in FOLLOW_UP_PATTERNS
         )
     )
 
@@ -939,6 +1114,12 @@ async def chat(
             title=user_query
         )
 
+    conversation_context = conversation_context_for_request(
+        principal_id=principal_id,
+        conversation_id=conversation_id,
+        client_context=request.conversation_context
+    )
+
     chat_audit_store.add_message(
         conversation_id=conversation_id,
         principal_id=principal_id,
@@ -947,7 +1128,7 @@ async def chat(
     )
     analysis_query = contextual_query(
         user_query,
-        request.conversation_context
+        conversation_context
     )
 
     # ---------------------------------------------------
@@ -1158,12 +1339,9 @@ async def chat(
             conversation_id=conversation_id,
             principal_id=principal_id,
             role="assistant",
-            content=(
-                response.get(
-                    "error"
-                )
-                or "Analysis completed."
-            ),
+            content=response_context_text(
+                response
+            ) or "Analysis completed.",
             payload=final_response
         )
 
@@ -1532,6 +1710,12 @@ async def report(
             title=user_query
         )
 
+    conversation_context = conversation_context_for_request(
+        principal_id=principal_id,
+        conversation_id=conversation_id,
+        client_context=request.conversation_context
+    )
+
     chat_audit_store.add_message(
         conversation_id=conversation_id,
         principal_id=principal_id,
@@ -1540,7 +1724,7 @@ async def report(
     )
     analysis_query = contextual_query(
         user_query,
-        request.conversation_context
+        conversation_context
     )
 
     intelligence = await run_blocking(
@@ -1590,12 +1774,9 @@ async def report(
             conversation_id=conversation_id,
             principal_id=principal_id,
             role="assistant",
-            content=(
-                response.get(
-                    "error"
-                )
-                or "Report generated."
-            ),
+            content=response_context_text(
+                response
+            ) or "Report generated.",
             payload=final_response
         )
         chat_audit_store.record_chat(

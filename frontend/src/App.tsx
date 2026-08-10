@@ -339,6 +339,25 @@ function newMessageId(role: ChatMessage["role"]) {
   return `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function messageContextContent(message: ChatMessage) {
+  if (message.role !== "assistant") {
+    return message.content;
+  }
+
+  const response = message.result.response;
+  const value = response?.data ?? response?.error;
+
+  if (typeof value === "string") {
+    return value.slice(0, 2000);
+  }
+
+  if (value) {
+    return JSON.stringify(value).slice(0, 2000);
+  }
+
+  return message.result.query;
+}
+
 function messagesFromHistoryItem(
   item: ChatHistoryItem
 ): ChatMessage[] {
@@ -708,10 +727,7 @@ async function fetchAnalysis(
         .slice(-8)
         .map((message) => ({
           role: message.role,
-          content:
-            message.role === "assistant"
-              ? message.result.query
-              : message.content,
+          content: messageContextContent(message),
         })),
     }),
   });
@@ -757,10 +773,7 @@ async function fetchAnalysisStream(
         .slice(-8)
         .map((message) => ({
           role: message.role,
-          content:
-            message.role === "assistant"
-              ? message.result.query
-              : message.content,
+          content: messageContextContent(message),
         })),
     }),
   });

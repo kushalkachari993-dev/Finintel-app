@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from backend import main
 from backend.main import ChatRequest
 from backend.main import ConversationContextMessage
+from backend.main import conversation_context_for_request
 from backend.main import contextual_query
+from backend.main import response_context_text
 
 
 def test_chat_request_defaults_to_brief_answer_detail():
@@ -81,6 +83,119 @@ def test_contextual_query_does_not_treat_it_sector_as_pronoun():
             )
         ]
     ) == query
+
+
+def test_contextual_query_expands_natural_follow_up():
+    expanded = contextual_query(
+        "What about its debt trend?",
+        [
+            ConversationContextMessage(
+                role="user",
+                content="Analyze Reliance Industries"
+            )
+        ]
+    )
+
+    assert "Analyze Reliance Industries" in expanded
+    assert "What about its debt trend?" in expanded
+
+
+def test_contextual_query_leaves_short_unrelated_question_unchanged():
+    query = "What is inflation?"
+
+    assert contextual_query(
+        query,
+        [
+            ConversationContextMessage(
+                role="user",
+                content="Analyze TCS fundamentals"
+            )
+        ]
+    ) == query
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Why?",
+        "And valuation?",
+        "More details"
+    ]
+)
+def test_contextual_query_expands_terse_follow_up(query):
+    expanded = contextual_query(
+        query,
+        [
+            ConversationContextMessage(
+                role="user",
+                content="Analyze TCS fundamentals"
+            )
+        ]
+    )
+
+    assert "Analyze TCS fundamentals" in expanded
+    assert query in expanded
+
+
+def test_response_context_text_serializes_structured_answer():
+    text = response_context_text(
+        {
+            "success": True,
+            "data": {
+                "company": "TCS",
+                "summary": "Margins remain strong."
+            }
+        }
+    )
+
+    assert '"company":"TCS"' in text
+    assert "Margins remain strong." in text
+
+
+def test_server_conversation_history_overrides_client_context(
+    monkeypatch
+):
+    monkeypatch.setattr(
+        main.chat_audit_store,
+        "list_messages",
+        lambda **_: [
+            {
+                "role": "user",
+                "content": "Analyze TCS",
+                "payload": None
+            },
+            {
+                "role": "assistant",
+                "content": "Analysis completed.",
+                "payload": {
+                    "response": {
+                        "success": True,
+                        "data": {
+                            "summary": "TCS has strong margins."
+                        }
+                    }
+                }
+            }
+        ]
+    )
+
+    context = conversation_context_for_request(
+        principal_id="clerk:user-1",
+        conversation_id="conversation-1",
+        client_context=[
+            ConversationContextMessage(
+                role="user",
+                content="Fabricated browser context"
+            )
+        ]
+    )
+
+    assert context[0].content == "Analyze TCS"
+    assert "TCS has strong margins." in context[1].content
+    assert all(
+        "Fabricated" not in message.content
+        for message in context
+    )
 
 
 @pytest.mark.anyio
