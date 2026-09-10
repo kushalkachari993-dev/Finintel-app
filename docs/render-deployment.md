@@ -4,12 +4,16 @@ This project deploys to Render as two services:
 
 - `finintel-ai-backend`: FastAPI web service
 - `finintel-ai-frontend`: React/Vite static site
+- External PostgreSQL database: Neon
 
 The root `render.yaml` is a Render Blueprint. It follows Render's current
 Blueprint model: web services use `type: web`, Python uses
 `runtime: python`, static sites use `runtime: static`, and `/health` is the
 backend health check. Both services use `autoDeployTrigger: checksPass`,
 so Render deploys only after GitHub Actions checks pass.
+
+The Blueprint does not create a Render PostgreSQL database. Production uses
+the external Neon database supplied through the `DATABASE_URL` secret.
 
 ## Create The Blueprint
 
@@ -26,6 +30,7 @@ Set these on `finintel-ai-backend`:
 ```env
 GROQ_API_KEY=...
 TAVILY_API_KEY=...
+DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require
 FRONTEND_ALLOWED_ORIGINS=https://your-frontend.onrender.com
 CLERK_JWKS_URL=https://your-clerk-domain/.well-known/jwks.json
 CLERK_ISSUER=https://your-clerk-domain
@@ -61,10 +66,18 @@ VITE_SENTRY_DSN=...
 
 ## Database
 
-The Blueprint provisions Render Postgres and injects its connection string
-as `DATABASE_URL`. Local development can continue using the default SQLite
-database, but deployed chat history does not rely on Render's ephemeral
-service filesystem.
+Use the pooled PostgreSQL connection string from the Neon production branch:
+
+1. In Neon, open the project and select **Connect**.
+2. Select the production branch, database, and application role.
+3. Keep **Connection pooling** enabled and copy the connection string.
+4. In the Render backend service, set `DATABASE_URL` to that string.
+5. Redeploy the backend and verify `/health` before testing chat.
+
+Local development can continue using the default SQLite database. Never use
+SQLite for the deployed service because Render's service filesystem is
+ephemeral, and do not re-add a Render database block unless production is
+intentionally migrated away from Neon.
 
 ## After First Deploy
 

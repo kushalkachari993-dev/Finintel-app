@@ -172,6 +172,43 @@ def test_chat_stream_returns_progress_and_final_events(monkeypatch):
     assert '"route": "EDUCATIONAL"' in body
 
 
+def test_chat_stream_returns_terminal_error_when_orchestration_fails(
+    monkeypatch,
+):
+
+    configure_test_security(monkeypatch)
+    mock_chat_dependencies(monkeypatch)
+
+    def fail_query_intelligence(query):
+        _ = query
+        raise RuntimeError("Query intelligence failed.")
+
+    monkeypatch.setattr(
+        main.query_intelligence,
+        "extract",
+        fail_query_intelligence,
+    )
+
+    with TestClient(main.app) as client:
+        with client.stream(
+            "POST",
+            "/chat/stream",
+            headers={
+                "X-API-Key": "test-key",
+            },
+            json={
+                "query": "What is ROE?",
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: progress" in body
+    assert "event: error" in body
+    assert "Query intelligence failed." in body
+    assert "event: final" not in body
+
+
 def test_chat_rate_limits_valid_api_key(monkeypatch):
 
     configure_test_security(monkeypatch)

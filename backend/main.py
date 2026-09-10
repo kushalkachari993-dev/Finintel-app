@@ -53,10 +53,6 @@ from backend.agents.report_agent import (
     ReportAgent
 )
 
-from backend.llm.model_selector import (
-    select_groq_model
-)
-
 from backend.intelligence.query_intelligence import (
     QueryIntelligence
 )
@@ -69,16 +65,10 @@ from backend.utils.logging_config import (
 
 from backend.utils.rate_limiter import build_rate_limiter
 
-from backend.utils.async_execution import (
-    run_blocking
-)
-
-from backend.utils.financial_guardrails import (
-    apply_financial_guardrails
-)
-
 from backend.security import APIKeyAuthenticator
 from backend.security import ClerkAuthenticator
+
+from backend.services import ResearchService
 
 from backend.observability import observability
 from backend.observability.metrics import RequestTrace
@@ -1321,17 +1311,174 @@ def delete_chat_conversation(
     }
 
 # ---------------------------------------------------
-# CHAT ROUTE
+# RESEARCH ROUTES
 # ---------------------------------------------------
+
+def build_research_service() -> ResearchService:
+    """Build from current dependencies so test/runtime overrides remain visible."""
+
+    return ResearchService(
+        router_agent=router_agent,
+        fundamental_agent=fundamental_agent,
+        comparison_agent=comparison_agent,
+        price_agent=price_agent,
+        educational_agent=educational_agent,
+        discovery_agent=discovery_agent,
+        news_agent=news_agent,
+        report_agent=report_agent,
+        query_intelligence=query_intelligence,
+        chat_audit_store=chat_audit_store,
+        conversation_context_for_request=conversation_context_for_request,
+        contextual_query=contextual_query,
+        build_generation_context=build_generation_context,
+        is_follow_up_query=is_follow_up_query,
+        response_context_text=response_context_text,
+    )
+
+
+def research_request_metadata(
+    http_request: Request,
+) -> dict:
+    state = http_request.state
+    api_client = getattr(
+        state,
+        "api_client",
+        None,
+    )
+
+    return {
+        "principal_id": (
+            getattr(
+                state,
+                "principal_id",
+                None,
+            )
+            or "unknown"
+        ),
+        "request_id": getattr(
+            state,
+            "request_id",
+            "",
+        ),
+        "api_client_id": (
+            api_client.client_id
+            if api_client
+            else None
+        ),
+        "on_route_selected": (
+            lambda route: setattr(
+                state,
+                "route",
+                route,
+            )
+        ),
+    }
+
+
+def research_http_response(
+    outcome,
+):
+    if outcome.status_code == 200:
+        return outcome.payload
+
+    return JSONResponse(
+        status_code=outcome.status_code,
+        content=outcome.payload,
+    )
+
 
 def sse_event(
     event: str,
-    data: dict
+    data: dict,
 ) -> str:
-
     return (
         f"event: {event}\n"
         f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+    )
+
+
+async def stream_research_result(
+    *,
+    request: ChatRequest,
+    http_request: Request,
+    mode: Literal["chat", "report"],
+):
+    progress_steps = (
+        [
+            "Understanding your question...",
+            "Checking conversation context...",
+            "Routing to the right research workflow...",
+            "Fetching market data and sources...",
+            "Generating a grounded answer...",
+            "Finalizing response...",
+        ]
+        if mode == "chat"
+        else [
+            "Understanding the report brief...",
+            "Checking conversation context...",
+            "Resolving companies and themes...",
+            "Retrieving financial data and sources...",
+            "Assembling analyst sections...",
+            "Finalizing structured report...",
+        ]
+    )
+
+    for index, step in enumerate(
+        progress_steps,
+        start=1,
+    ):
+        yield sse_event(
+            "progress",
+            {
+                "step": step,
+                "index": index,
+                "total": len(progress_steps),
+            },
+        )
+        await asyncio.sleep(0.05)
+
+    try:
+        service = build_research_service()
+        metadata = research_request_metadata(
+            http_request
+        )
+        if mode == "report":
+            outcome = await service.execute_report(
+                query=request.query,
+                conversation_id=request.conversation_id,
+                client_context=request.conversation_context,
+                **metadata,
+            )
+        else:
+            outcome = await service.execute_chat(
+                query=request.query,
+                answer_detail=request.answer_detail,
+                conversation_id=request.conversation_id,
+                client_context=request.conversation_context,
+                **metadata,
+            )
+    except Exception:
+        logger.exception(
+            "research_stream_failed mode=%s",
+            mode,
+        )
+        yield sse_event(
+            "error",
+            {
+                "success": False,
+                "error": "Research request failed unexpectedly.",
+            },
+        )
+        return
+
+    terminal_event = (
+        "final"
+        if outcome.status_code == 200
+        else "error"
+    )
+    yield sse_event(
+        terminal_event,
+        outcome.payload,
     )
 
 
@@ -1339,622 +1486,37 @@ def sse_event(
 async def chat(
     request: ChatRequest,
     http_request: Request,
-    api_key: str = Security(api_key_header)
+    api_key: str = Security(api_key_header),
 ):
-
     # The middleware enforces this value. This dependency exists
     # so Swagger UI exposes the X-API-Key input.
     _ = api_key
-    chat_started_at = time.perf_counter()
-
-    # ---------------------------------------------------
-    # USER QUERY
-    # ---------------------------------------------------
-
-    user_query = request.query.strip()
-    answer_detail = request.answer_detail
-    principal_id = getattr(
-        http_request.state,
-        "principal_id",
-        None
-    ) or "unknown"
-
-    if not user_query:
-
-        logger.warning(
-            "empty_query_rejected"
-        )
-
-        return JSONResponse(
-            status_code=400,
-            content={
-
-                "success": False,
-
-                "error":
-                "Query cannot be empty."
-            }
-        )
-
-    conversation_id = request.conversation_id
-
-    if conversation_id:
-
-        if not chat_audit_store.conversation_exists(
-            principal_id=principal_id,
-            conversation_id=conversation_id
-        ):
-
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "success": False,
-                    "error": "Conversation not found."
-                }
-            )
-
-    else:
-
-        conversation_id = chat_audit_store.create_conversation(
-            principal_id=principal_id,
-            title=user_query
-        )
-
-    conversation_context = conversation_context_for_request(
-        principal_id=principal_id,
-        conversation_id=conversation_id,
-        client_context=request.conversation_context
+    outcome = await build_research_service().execute_chat(
+        query=request.query,
+        answer_detail=request.answer_detail,
+        conversation_id=request.conversation_id,
+        client_context=request.conversation_context,
+        **research_request_metadata(http_request),
     )
-
-    chat_audit_store.add_message(
-        conversation_id=conversation_id,
-        principal_id=principal_id,
-        role="user",
-        content=user_query
-    )
-    analysis_query = contextual_query(
-        user_query,
-        conversation_context
-    )
-    llm_conversation_context = (
-        build_generation_context(
-            conversation_context
-        )
-        if is_follow_up_query(
-            user_query
-        )
-        else ""
-    )
-
-    # ---------------------------------------------------
-    # QUERY INTELLIGENCE
-    # ---------------------------------------------------
-
-    intelligence = await run_blocking(
-        query_intelligence.extract,
-        analysis_query,
-        timeout_seconds=settings.EXTERNAL_CALL_TIMEOUT_SECONDS
-    )
-
-    logger.info(
-        "query_intelligence query=%r intelligence=%s",
-        user_query,
-        intelligence
-    )
-
-    # ---------------------------------------------------
-    # ROUTER
-    # ---------------------------------------------------
-
-    routing_result = await run_blocking(
-        router_agent.route,
-        analysis_query,
-        intelligence=intelligence,
-        timeout_seconds=settings.EXTERNAL_CALL_TIMEOUT_SECONDS
-    )
-
-    route = routing_result.get(
-        "route",
-        "FUNDAMENTAL"
-    )
-    selected_model = select_groq_model(
-        route,
-        answer_detail
-    )
-    http_request.state.route = route
-
-    logger.info(
-        "route_selected query=%r route=%s model=%s routing=%s",
-        user_query,
-        route,
-        selected_model,
-        routing_result
-    )
-
-    # ---------------------------------------------------
-    # ROUTE EXECUTION
-    # ---------------------------------------------------
-
-    try:
-
-        # -----------------------------------
-        # FUNDAMENTAL
-        # -----------------------------------
-
-        if route == "FUNDAMENTAL":
-
-            response = await run_blocking(
-                fundamental_agent.analyze,
-                query=analysis_query,
-                intelligence=intelligence,
-                model=selected_model,
-                answer_detail=answer_detail,
-                conversation_context=llm_conversation_context,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-        # -----------------------------------
-        # PRICE QUERY
-        # -----------------------------------
-
-        elif route == "PRICE_QUERY":
-
-            response = await run_blocking(
-                price_agent.get_price,
-                analysis_query,
-                answer_detail=answer_detail,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-        # -----------------------------------
-        # COMPARISON
-        # -----------------------------------
-
-        elif route == "COMPARISON":
-
-            response = await run_blocking(
-                comparison_agent.compare,
-                analysis_query,
-                intelligence=intelligence,
-                model=selected_model,
-                answer_detail=answer_detail,
-                conversation_context=llm_conversation_context,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-        # -----------------------------------
-        # EDUCATIONAL
-        # -----------------------------------
-
-        elif route == "EDUCATIONAL":
-
-            response = await run_blocking(
-                educational_agent.explain,
-                analysis_query,
-                model=selected_model,
-                answer_detail=answer_detail,
-                conversation_context=llm_conversation_context,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-        # -----------------------------------
-        # NEWS
-        # -----------------------------------
-
-        elif route == "NEWS":
-
-            response = await run_blocking(
-                news_agent.analyze,
-                analysis_query,
-                intelligence=intelligence,
-                model=selected_model,
-                answer_detail=answer_detail,
-                conversation_context=llm_conversation_context,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-        # -----------------------------------
-        # DISCOVERY
-        # -----------------------------------
-
-        elif route == "DISCOVERY":
-
-            response = await run_blocking(
-                discovery_agent.discover,
-                analysis_query,
-                intelligence=intelligence,
-                model=selected_model,
-                answer_detail=answer_detail,
-                conversation_context=llm_conversation_context,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-        # -----------------------------------
-        # SAFE FALLBACK
-        # -----------------------------------
-
-        else:
-
-            response = await run_blocking(
-                fundamental_agent.analyze,
-                analysis_query,
-                model=selected_model,
-                answer_detail=answer_detail,
-                conversation_context=llm_conversation_context,
-                timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-            )
-
-            route = "FUNDAMENTAL"
-
-            routing_result = {
-
-                "route":
-                "FUNDAMENTAL",
-
-                "confidence":
-                0.30,
-
-                "reasoning":
-                "Fallback route triggered."
-            }
-
-        # ---------------------------------------------------
-        # FINAL RESPONSE
-        # ---------------------------------------------------
-
-        response = apply_financial_guardrails(
-            response,
-            route
-        )
-
-        final_response = {
-
-            "success": True,
-
-            "query":
-            user_query,
-
-            "conversation_id":
-            conversation_id,
-
-            "answer_detail":
-            answer_detail,
-
-            "route":
-            route,
-
-            "routing":
-            routing_result,
-
-            "query_intelligence":
-            intelligence,
-
-            "model":
-            selected_model,
-
-            "response":
-            response
-        }
-
-        chat_audit_store.add_message(
-            conversation_id=conversation_id,
-            principal_id=principal_id,
-            role="assistant",
-            content=response_context_text(
-                response
-            ) or "Analysis completed.",
-            payload=final_response
-        )
-
-        chat_audit_store.record_chat(
-            request_id=getattr(
-                http_request.state,
-                "request_id",
-                ""
-            ),
-            principal_id=getattr(
-                http_request.state,
-                "principal_id",
-                None
-            ),
-            user_id=None,
-            api_client_id=(
-                http_request.state.api_client.client_id
-                if getattr(
-                    http_request.state,
-                    "api_client",
-                    None
-                )
-                else None
-            ),
-            query=user_query,
-            route=route,
-            routing=routing_result,
-            query_intelligence=intelligence,
-            response=response,
-            answer_detail=answer_detail,
-            model=selected_model,
-            conversation_id=conversation_id,
-            latency_ms=round(
-                (
-                    time.perf_counter()
-                    - chat_started_at
-                )
-                * 1000,
-                2
-            )
-        )
-
-        return final_response
-
-    # ---------------------------------------------------
-    # GLOBAL ERROR HANDLER
-    # ---------------------------------------------------
-
-    except Exception as e:
-
-        if isinstance(
-            e,
-            TimeoutError
-        ):
-
-            logger.warning(
-                "chat_timed_out query=%r route=%s",
-                user_query,
-                route
-            )
-
-            error_response = {
-                "success": False,
-                "error": "Request timed out while waiting for external providers."
-            }
-
-            chat_audit_store.add_message(
-                conversation_id=conversation_id,
-                principal_id=principal_id,
-                role="assistant",
-                content=error_response["error"],
-                payload={
-                    "success": False,
-                    "query": user_query,
-                    "conversation_id": conversation_id,
-                    "answer_detail": answer_detail,
-                    "route": route,
-                    "routing": routing_result,
-                    "query_intelligence": intelligence,
-                    "model": selected_model,
-                    "response": error_response
-                }
-            )
-
-            chat_audit_store.record_chat(
-                request_id=getattr(
-                    http_request.state,
-                    "request_id",
-                    ""
-                ),
-                principal_id=getattr(
-                    http_request.state,
-                    "principal_id",
-                    None
-                ),
-                user_id=None,
-                api_client_id=(
-                    http_request.state.api_client.client_id
-                    if getattr(
-                        http_request.state,
-                        "api_client",
-                        None
-                    )
-                    else None
-                ),
-                query=user_query,
-                route=route,
-                routing=routing_result,
-                query_intelligence=intelligence,
-                response=error_response,
-                answer_detail=answer_detail,
-                model=selected_model,
-                conversation_id=conversation_id,
-                latency_ms=round(
-                    (
-                        time.perf_counter()
-                        - chat_started_at
-                    )
-                    * 1000,
-                    2
-                )
-            )
-
-            return JSONResponse(
-                status_code=504,
-                content={
-
-                    "success": False,
-
-                    "query":
-                    user_query,
-
-                    "answer_detail":
-                    answer_detail,
-
-                    "route":
-                    route,
-
-                    "routing":
-                    routing_result,
-
-                    "query_intelligence":
-                    intelligence,
-
-                    "error":
-                    error_response["error"]
-                }
-            )
-
-        logger.exception(
-            "chat_failed query=%r route=%s",
-            user_query,
-            route
-        )
-
-        error_response = {
-            "success": False,
-            "error": str(e)
-        }
-
-        chat_audit_store.add_message(
-            conversation_id=conversation_id,
-            principal_id=principal_id,
-            role="assistant",
-            content=error_response["error"],
-            payload={
-                "success": False,
-                "query": user_query,
-                "conversation_id": conversation_id,
-                "answer_detail": answer_detail,
-                "route": route,
-                "routing": routing_result,
-                "query_intelligence": intelligence,
-                "model": selected_model,
-                "response": error_response
-            }
-        )
-
-        chat_audit_store.record_chat(
-            request_id=getattr(
-                http_request.state,
-                "request_id",
-                ""
-            ),
-            principal_id=getattr(
-                http_request.state,
-                "principal_id",
-                None
-            ),
-            user_id=None,
-            api_client_id=(
-                http_request.state.api_client.client_id
-                if getattr(
-                    http_request.state,
-                    "api_client",
-                    None
-                )
-                else None
-            ),
-            query=user_query,
-            route=route,
-            routing=routing_result,
-            query_intelligence=intelligence,
-            response=error_response,
-            answer_detail=answer_detail,
-            model=selected_model,
-            conversation_id=conversation_id,
-            latency_ms=round(
-                (
-                    time.perf_counter()
-                    - chat_started_at
-                )
-                * 1000,
-                2
-            )
-        )
-
-        return JSONResponse(
-            status_code=500,
-            content={
-
-                "success": False,
-
-                "query":
-                user_query,
-
-                "answer_detail":
-                answer_detail,
-
-                "route":
-                route,
-
-                "routing":
-                routing_result,
-
-                "query_intelligence":
-                intelligence,
-
-                "error":
-                error_response["error"]
-            }
-        )
+    return research_http_response(outcome)
 
 
 @app.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
-    http_request: Request
+    http_request: Request,
 ):
-
-    async def event_generator():
-
-        progress_steps = [
-            "Understanding your question...",
-            "Checking conversation context...",
-            "Routing to the right research workflow...",
-            "Fetching market data and sources...",
-            "Generating a grounded answer...",
-            "Finalizing response..."
-        ]
-
-        for index, step in enumerate(
-            progress_steps,
-            start=1
-        ):
-
-            yield sse_event(
-                "progress",
-                {
-                    "step": step,
-                    "index": index,
-                    "total": len(progress_steps)
-                }
-            )
-            await asyncio.sleep(
-                0.05
-            )
-
-        result = await chat(
+    return StreamingResponse(
+        stream_research_result(
             request=request,
             http_request=http_request,
-            api_key=""
-        )
-
-        if isinstance(
-            result,
-            JSONResponse
-        ):
-
-            payload = json.loads(
-                result.body.decode(
-                    "utf-8"
-                )
-            )
-            yield sse_event(
-                "error",
-                payload
-            )
-            return
-
-        yield sse_event(
-            "final",
-            result
-        )
-
-    return StreamingResponse(
-        event_generator(),
+            mode="chat",
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no"
-        }
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -1962,322 +1524,32 @@ async def chat_stream(
 async def report(
     request: ChatRequest,
     http_request: Request,
-    api_key: str = Security(api_key_header)
+    api_key: str = Security(api_key_header),
 ):
-
     _ = api_key
-    report_started_at = time.perf_counter()
-
-    user_query = request.query.strip()
-    answer_detail = "detailed"
-    route = "REPORT"
-    principal_id = getattr(
-        http_request.state,
-        "principal_id",
-        None
-    ) or "unknown"
-
-    if not user_query:
-
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error": "Query cannot be empty."
-            }
-        )
-
-    conversation_id = request.conversation_id
-
-    if conversation_id:
-
-        if not chat_audit_store.conversation_exists(
-            principal_id=principal_id,
-            conversation_id=conversation_id
-        ):
-
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "success": False,
-                    "error": "Conversation not found."
-                }
-            )
-
-    else:
-
-        conversation_id = chat_audit_store.create_conversation(
-            principal_id=principal_id,
-            title=user_query
-        )
-
-    conversation_context = conversation_context_for_request(
-        principal_id=principal_id,
-        conversation_id=conversation_id,
-        client_context=request.conversation_context
+    outcome = await build_research_service().execute_report(
+        query=request.query,
+        conversation_id=request.conversation_id,
+        client_context=request.conversation_context,
+        **research_request_metadata(http_request),
     )
-
-    chat_audit_store.add_message(
-        conversation_id=conversation_id,
-        principal_id=principal_id,
-        role="user",
-        content=user_query
-    )
-    analysis_query = contextual_query(
-        user_query,
-        conversation_context
-    )
-    llm_conversation_context = (
-        build_generation_context(
-            conversation_context
-        )
-        if is_follow_up_query(
-            user_query
-        )
-        else ""
-    )
-
-    intelligence = await run_blocking(
-        query_intelligence.extract,
-        analysis_query,
-        timeout_seconds=settings.EXTERNAL_CALL_TIMEOUT_SECONDS
-    )
-    selected_model = select_groq_model(
-        route,
-        answer_detail
-    )
-    http_request.state.route = route
-
-    routing_result = {
-        "route": route,
-        "confidence": 1.0,
-        "reasoning": "Report mode selected by user."
-    }
-
-    try:
-
-        response = await run_blocking(
-            report_agent.generate,
-            query=analysis_query,
-            intelligence=intelligence,
-            model=selected_model,
-            conversation_context=llm_conversation_context,
-            timeout_seconds=settings.CHAT_EXECUTION_TIMEOUT_SECONDS
-        )
-        response = apply_financial_guardrails(
-            response,
-            route
-        )
-
-        final_response = {
-            "success": True,
-            "query": user_query,
-            "conversation_id": conversation_id,
-            "answer_detail": answer_detail,
-            "route": route,
-            "routing": routing_result,
-            "query_intelligence": intelligence,
-            "model": selected_model,
-            "response": response
-        }
-
-        chat_audit_store.add_message(
-            conversation_id=conversation_id,
-            principal_id=principal_id,
-            role="assistant",
-            content=response_context_text(
-                response
-            ) or "Report generated.",
-            payload=final_response
-        )
-        chat_audit_store.record_chat(
-            request_id=getattr(
-                http_request.state,
-                "request_id",
-                ""
-            ),
-            principal_id=getattr(
-                http_request.state,
-                "principal_id",
-                None
-            ),
-            user_id=None,
-            api_client_id=(
-                http_request.state.api_client.client_id
-                if getattr(
-                    http_request.state,
-                    "api_client",
-                    None
-                )
-                else None
-            ),
-            query=user_query,
-            route=route,
-            routing=routing_result,
-            query_intelligence=intelligence,
-            response=response,
-            answer_detail=answer_detail,
-            model=selected_model,
-            conversation_id=conversation_id,
-            latency_ms=round(
-                (
-                    time.perf_counter()
-                    - report_started_at
-                )
-                * 1000,
-                2
-            )
-        )
-
-        return final_response
-
-    except Exception as e:
-
-        logger.exception(
-            "report_failed query=%r",
-            user_query
-        )
-
-        error_response = {
-            "success": False,
-            "error": str(e)
-        }
-        chat_audit_store.add_message(
-            conversation_id=conversation_id,
-            principal_id=principal_id,
-            role="assistant",
-            content=error_response["error"],
-            payload={
-                "success": False,
-                "query": user_query,
-                "conversation_id": conversation_id,
-                "answer_detail": answer_detail,
-                "route": route,
-                "routing": routing_result,
-                "query_intelligence": intelligence,
-                "model": selected_model,
-                "response": error_response
-            }
-        )
-        chat_audit_store.record_chat(
-            request_id=getattr(
-                http_request.state,
-                "request_id",
-                ""
-            ),
-            principal_id=getattr(
-                http_request.state,
-                "principal_id",
-                None
-            ),
-            user_id=None,
-            api_client_id=(
-                http_request.state.api_client.client_id
-                if getattr(
-                    http_request.state,
-                    "api_client",
-                    None
-                )
-                else None
-            ),
-            query=user_query,
-            route=route,
-            routing=routing_result,
-            query_intelligence=intelligence,
-            response=error_response,
-            answer_detail=answer_detail,
-            model=selected_model,
-            conversation_id=conversation_id,
-            latency_ms=round(
-                (
-                    time.perf_counter()
-                    - report_started_at
-                )
-                * 1000,
-                2
-            )
-        )
-
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "query": user_query,
-                "answer_detail": answer_detail,
-                "route": route,
-                "routing": routing_result,
-                "query_intelligence": intelligence,
-                "error": error_response["error"]
-            }
-        )
+    return research_http_response(outcome)
 
 
 @app.post("/report/stream")
 async def report_stream(
     request: ChatRequest,
-    http_request: Request
+    http_request: Request,
 ):
-
-    async def event_generator():
-
-        progress_steps = [
-            "Understanding the report brief...",
-            "Checking conversation context...",
-            "Resolving companies and themes...",
-            "Retrieving financial data and sources...",
-            "Assembling analyst sections...",
-            "Finalizing structured report..."
-        ]
-
-        for index, step in enumerate(
-            progress_steps,
-            start=1
-        ):
-
-            yield sse_event(
-                "progress",
-                {
-                    "step": step,
-                    "index": index,
-                    "total": len(progress_steps)
-                }
-            )
-            await asyncio.sleep(
-                0.05
-            )
-
-        result = await report(
+    return StreamingResponse(
+        stream_research_result(
             request=request,
             http_request=http_request,
-            api_key=""
-        )
-
-        if isinstance(
-            result,
-            JSONResponse
-        ):
-
-            payload = json.loads(
-                result.body.decode(
-                    "utf-8"
-                )
-            )
-            yield sse_event(
-                "error",
-                payload
-            )
-            return
-
-        yield sse_event(
-            "final",
-            result
-        )
-
-    return StreamingResponse(
-        event_generator(),
+            mode="report",
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no"
-        }
+            "X-Accel-Buffering": "no",
+        },
     )
