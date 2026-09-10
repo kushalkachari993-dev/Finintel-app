@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 ResearchMode = Literal["chat", "report"]
+ProgressCallback = Callable[[str, dict], None]
+CHAT_ROUTES = {
+    "FUNDAMENTAL",
+    "PRICE_QUERY",
+    "COMPARISON",
+    "EDUCATIONAL",
+    "NEWS",
+    "DISCOVERY",
+}
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,8 @@ class ConversationNotFoundError(Exception):
 
 class ResearchService:
     """Coordinates one research request independently of the HTTP transport."""
+
+    SUCCESS_PROGRESS_TOTAL = 10
 
     def __init__(
         self,
@@ -78,6 +89,7 @@ class ResearchService:
         request_id: str = "",
         api_client_id: str | None = None,
         on_route_selected: Callable[[str], None] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> ResearchOutcome:
         return await self._execute(
             mode="chat",
@@ -89,6 +101,7 @@ class ResearchService:
             request_id=request_id,
             api_client_id=api_client_id,
             on_route_selected=on_route_selected,
+            on_progress=on_progress,
         )
 
     async def execute_report(
@@ -101,6 +114,7 @@ class ResearchService:
         request_id: str = "",
         api_client_id: str | None = None,
         on_route_selected: Callable[[str], None] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> ResearchOutcome:
         return await self._execute(
             mode="report",
@@ -112,6 +126,7 @@ class ResearchService:
             request_id=request_id,
             api_client_id=api_client_id,
             on_route_selected=on_route_selected,
+            on_progress=on_progress,
         )
 
     async def _execute(
@@ -126,6 +141,7 @@ class ResearchService:
         request_id: str,
         api_client_id: str | None,
         on_route_selected: Callable[[str], None] | None,
+        on_progress: ProgressCallback | None,
     ) -> ResearchOutcome:
         started_at = time.perf_counter()
         user_query = query.strip()
@@ -142,7 +158,20 @@ class ResearchService:
         intelligence = {}
         selected_model = None
 
+        self._emit_progress(
+            on_progress,
+            "request_started",
+            message="Research request accepted.",
+            mode=mode,
+        )
+
         if not user_query:
+            self._emit_progress(
+                on_progress,
+                "failed",
+                message="Query cannot be empty.",
+                status_code=400,
+            )
             return ResearchOutcome(
                 payload={
                     "success": False,
@@ -158,12 +187,24 @@ class ResearchService:
                 conversation_id=conversation_id,
                 title=user_query,
             )
+            self._emit_progress(
+                on_progress,
+                "conversation_ready",
+                message="Conversation is ready.",
+                conversation_id=conversation_id,
+            )
             conversation_context = (
                 self.conversation_context_for_request(
                     principal_id=principal_id,
                     conversation_id=conversation_id,
                     client_context=client_context,
                 )
+            )
+            self._emit_progress(
+                on_progress,
+                "context_loaded",
+                message="Conversation context loaded.",
+                message_count=len(conversation_context),
             )
             self.chat_audit_store.add_message(
                 conversation_id=conversation_id,
@@ -197,6 +238,16 @@ class ResearchService:
                 user_query,
                 intelligence,
             )
+            self._emit_progress(
+                on_progress,
+                "query_classified",
+                message="Question classified.",
+                intent=(
+                    intelligence.get("intent")
+                    if isinstance(intelligence, dict)
+                    else None
+                ),
+            )
 
             if mode == "chat":
                 routing_result = await run_blocking(
@@ -212,6 +263,14 @@ class ResearchService:
                     "FUNDAMENTAL",
                 )
 
+                if route not in CHAT_ROUTES:
+                    route = "FUNDAMENTAL"
+                    routing_result = {
+                        "route": route,
+                        "confidence": 0.30,
+                        "reasoning": "Fallback route triggered.",
+                    }
+
             selected_model = select_groq_model(
                 route,
                 answer_detail,
@@ -220,12 +279,30 @@ class ResearchService:
             if on_route_selected:
                 on_route_selected(route)
 
+            self._emit_progress(
+                on_progress,
+                "route_selected",
+                message=(
+                    "Using the "
+                    f"{route.replace('_', ' ').lower()} research workflow."
+                ),
+                route=route,
+                model=selected_model,
+            )
+
             logger.info(
                 "route_selected query=%r route=%s model=%s routing=%s",
                 user_query,
                 route,
                 selected_model,
                 routing_result,
+            )
+
+            self._emit_progress(
+                on_progress,
+                "agent_started",
+                message="Research agent started.",
+                route=route,
             )
 
             if mode == "report":
@@ -258,9 +335,22 @@ class ResearchService:
                 if on_route_selected:
                     on_route_selected(route)
 
+            self._emit_progress(
+                on_progress,
+                "response_generated",
+                message="Research response generated.",
+                route=route,
+            )
+
             response = apply_financial_guardrails(
                 response,
                 route,
+            )
+            self._emit_progress(
+                on_progress,
+                "guardrails_applied",
+                message="Financial guardrails applied.",
+                route=route,
             )
             final_response = {
                 "success": True,
@@ -284,6 +374,18 @@ class ResearchService:
                 conversation_id=conversation_id,
                 started_at=started_at,
             )
+            self._emit_progress(
+                on_progress,
+                "persisted",
+                message="Research result saved.",
+                conversation_id=conversation_id,
+            )
+            self._emit_progress(
+                on_progress,
+                "completed",
+                message="Research completed.",
+                route=route,
+            )
 
             return ResearchOutcome(
                 payload=final_response,
@@ -291,6 +393,12 @@ class ResearchService:
             )
 
         except ConversationNotFoundError:
+            self._emit_progress(
+                on_progress,
+                "failed",
+                message="Conversation not found.",
+                status_code=404,
+            )
             return ResearchOutcome(
                 payload={
                     "success": False,
@@ -323,6 +431,13 @@ class ResearchService:
                 request_id=request_id,
                 api_client_id=api_client_id,
                 started_at=started_at,
+            )
+            self._emit_progress(
+                on_progress,
+                "failed",
+                message=message,
+                status_code=504,
+                route=route,
             )
             return ResearchOutcome(
                 payload=self._error_payload(
@@ -359,6 +474,13 @@ class ResearchService:
                 api_client_id=api_client_id,
                 started_at=started_at,
             )
+            self._emit_progress(
+                on_progress,
+                "failed",
+                message=message,
+                status_code=500,
+                route=route,
+            )
             return ResearchOutcome(
                 payload=self._error_payload(
                     message=message,
@@ -370,6 +492,31 @@ class ResearchService:
                 ),
                 status_code=500,
                 route=route,
+            )
+
+    @staticmethod
+    def _emit_progress(
+        callback: ProgressCallback | None,
+        stage: str,
+        *,
+        message: str,
+        **details,
+    ):
+        if not callback:
+            return
+
+        try:
+            callback(
+                stage,
+                {
+                    "message": message,
+                    **details,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "research_progress_callback_failed stage=%s",
+                stage,
             )
 
     def _resolve_conversation(

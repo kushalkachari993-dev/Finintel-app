@@ -1397,66 +1397,97 @@ def sse_event(
     )
 
 
+RESEARCH_HEARTBEAT_SECONDS = 15
+
+
 async def stream_research_result(
     *,
     request: ChatRequest,
     http_request: Request,
     mode: Literal["chat", "report"],
 ):
-    progress_steps = (
-        [
-            "Understanding your question...",
-            "Checking conversation context...",
-            "Routing to the right research workflow...",
-            "Fetching market data and sources...",
-            "Generating a grounded answer...",
-            "Finalizing response...",
-        ]
-        if mode == "chat"
-        else [
-            "Understanding the report brief...",
-            "Checking conversation context...",
-            "Resolving companies and themes...",
-            "Retrieving financial data and sources...",
-            "Assembling analyst sections...",
-            "Finalizing structured report...",
-        ]
-    )
+    service = build_research_service()
+    progress_queue = asyncio.Queue()
 
-    for index, step in enumerate(
-        progress_steps,
-        start=1,
+    def on_progress(
+        stage: str,
+        payload: dict,
     ):
-        yield sse_event(
-            "progress",
-            {
-                "step": step,
-                "index": index,
-                "total": len(progress_steps),
-            },
+        progress_queue.put_nowait(
+            (
+                stage,
+                payload,
+            )
         )
-        await asyncio.sleep(0.05)
 
-    try:
-        service = build_research_service()
+    async def execute_research():
         metadata = research_request_metadata(
             http_request
         )
+
         if mode == "report":
-            outcome = await service.execute_report(
+            return await service.execute_report(
                 query=request.query,
                 conversation_id=request.conversation_id,
                 client_context=request.conversation_context,
+                on_progress=on_progress,
                 **metadata,
             )
-        else:
-            outcome = await service.execute_chat(
-                query=request.query,
-                answer_detail=request.answer_detail,
-                conversation_id=request.conversation_id,
-                client_context=request.conversation_context,
-                **metadata,
+
+        return await service.execute_chat(
+            query=request.query,
+            answer_detail=request.answer_detail,
+            conversation_id=request.conversation_id,
+            client_context=request.conversation_context,
+            on_progress=on_progress,
+            **metadata,
+        )
+
+    research_task = asyncio.create_task(
+        execute_research()
+    )
+    progress_index = 0
+
+    try:
+        while not (
+            research_task.done()
+            and progress_queue.empty()
+        ):
+            try:
+                stage, progress = await asyncio.wait_for(
+                    progress_queue.get(),
+                    timeout=RESEARCH_HEARTBEAT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                if research_task.done():
+                    continue
+
+                yield sse_event(
+                    "heartbeat",
+                    {
+                        "timestamp": int(time.time()),
+                    },
+                )
+                continue
+
+            progress_index += 1
+            progress_payload = dict(progress)
+            step = progress_payload.pop(
+                "message",
+                stage,
             )
+            yield sse_event(
+                "progress",
+                {
+                    "stage": stage,
+                    "step": step,
+                    "index": progress_index,
+                    "total": service.SUCCESS_PROGRESS_TOTAL,
+                    **progress_payload,
+                },
+            )
+
+        outcome = await research_task
     except Exception:
         logger.exception(
             "research_stream_failed mode=%s",
@@ -1470,6 +1501,13 @@ async def stream_research_result(
             },
         )
         return
+    finally:
+        if not research_task.done():
+            research_task.cancel()
+            try:
+                await research_task
+            except asyncio.CancelledError:
+                pass
 
     terminal_event = (
         "final"

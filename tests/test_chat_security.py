@@ -1,3 +1,7 @@
+import asyncio
+import time
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from backend import main
@@ -166,8 +170,25 @@ def test_chat_stream_returns_progress_and_final_events(monkeypatch):
             )
 
     assert response.status_code == 200
-    assert "event: progress" in body
-    assert "Understanding your question" in body
+    expected_stages = [
+        "request_started",
+        "conversation_ready",
+        "context_loaded",
+        "query_classified",
+        "route_selected",
+        "agent_started",
+        "response_generated",
+        "guardrails_applied",
+        "persisted",
+        "completed",
+    ]
+    stage_positions = [
+        body.index(f'"stage": "{stage}"')
+        for stage in expected_stages
+    ]
+
+    assert body.count("event: progress") == len(expected_stages)
+    assert stage_positions == sorted(stage_positions)
     assert "event: final" in body
     assert '"route": "EDUCATIONAL"' in body
 
@@ -204,9 +225,101 @@ def test_chat_stream_returns_terminal_error_when_orchestration_fails(
 
     assert response.status_code == 200
     assert "event: progress" in body
+    assert '"stage": "context_loaded"' in body
+    assert '"stage": "failed"' in body
     assert "event: error" in body
     assert "Query intelligence failed." in body
     assert "event: final" not in body
+
+
+def test_chat_stream_sends_heartbeat_during_slow_stage(monkeypatch):
+
+    configure_test_security(monkeypatch)
+    mock_chat_dependencies(monkeypatch)
+    monkeypatch.setattr(
+        main,
+        "RESEARCH_HEARTBEAT_SECONDS",
+        0.01,
+    )
+
+    def delayed_query_intelligence(query):
+        _ = query
+        time.sleep(0.04)
+        return {
+            "intent": "EDUCATIONAL",
+            "companies": [],
+        }
+
+    monkeypatch.setattr(
+        main.query_intelligence,
+        "extract",
+        delayed_query_intelligence,
+    )
+
+    with TestClient(main.app) as client:
+        with client.stream(
+            "POST",
+            "/chat/stream",
+            headers={
+                "X-API-Key": "test-key",
+            },
+            json={
+                "query": "What is ROE?",
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: heartbeat" in body
+    assert "event: final" in body
+
+
+def test_research_stream_cancels_work_when_consumer_closes(monkeypatch):
+
+    cancelled = asyncio.Event()
+
+    class BlockingResearchService:
+        SUCCESS_PROGRESS_TOTAL = 10
+
+        async def execute_chat(self, **kwargs):
+            kwargs["on_progress"](
+                "request_started",
+                {
+                    "message": "Research request accepted.",
+                },
+            )
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    monkeypatch.setattr(
+        main,
+        "build_research_service",
+        lambda: BlockingResearchService(),
+    )
+
+    async def close_stream():
+        stream = main.stream_research_result(
+            request=main.ChatRequest(
+                query="What is ROE?",
+            ),
+            http_request=SimpleNamespace(
+                state=SimpleNamespace(),
+            ),
+            mode="chat",
+        )
+
+        first_event = await anext(stream)
+        assert '"stage": "request_started"' in first_event
+
+        await stream.aclose()
+        await asyncio.wait_for(
+            cancelled.wait(),
+            timeout=1,
+        )
+
+    asyncio.run(close_stream())
 
 
 def test_chat_rate_limits_valid_api_key(monkeypatch):
