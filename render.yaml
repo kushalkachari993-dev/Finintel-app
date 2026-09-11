@@ -6,7 +6,7 @@ services:
     region: singapore
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    healthCheckPath: /ready
     autoDeployTrigger: checksPass
     envVars:
       - key: PYTHON_VERSION
@@ -33,6 +33,18 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
+      - key: DATABASE_POOL_MIN_SIZE
+        value: "1"
+      - key: DATABASE_POOL_MAX_SIZE
+        value: "5"
+      - key: DATABASE_POOL_TIMEOUT_SECONDS
+        value: "10"
+      - key: DATABASE_OPERATION_TIMEOUT_SECONDS
+        value: "10"
+      - key: DATABASE_CONNECT_RETRIES
+        value: "3"
+      - key: DATABASE_CONNECT_RETRY_DELAY_SECONDS
+        value: "1"
       - key: GROQ_FAST_MODEL
         value: "openai/gpt-oss-20b"
       - key: GROQ_COMPLEX_MODEL

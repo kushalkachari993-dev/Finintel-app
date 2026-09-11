@@ -15,6 +15,7 @@ from backend.config import settings
 from backend.intelligence.query_intelligence import QueryIntelligence
 from backend.security import APIKeyAuthenticator
 from backend.security import ClerkAuthenticator
+from backend.storage import is_sqlite_url
 from backend.utils.rate_limiter import build_rate_limiter
 
 
@@ -29,7 +30,7 @@ class ApplicationDependencies:
     news_agent: NewsAgent
     report_agent: ReportAgent
     query_intelligence: QueryIntelligence
-    chat_audit_store: ChatAuditStore
+    chat_audit_store: ChatAuditStore | None
     chat_rate_limiter: object
     api_key_authenticator: APIKeyAuthenticator
     clerk_authenticator: ClerkAuthenticator
@@ -47,7 +48,12 @@ def build_application_dependencies() -> ApplicationDependencies:
         news_agent=NewsAgent(),
         report_agent=ReportAgent(),
         query_intelligence=QueryIntelligence(),
-        chat_audit_store=ChatAuditStore(),
+        chat_audit_store=(
+            ChatAuditStore()
+            if settings.AUDIT_DATABASE_PATH
+            or is_sqlite_url(settings.AUDIT_DATABASE_URL)
+            else None
+        ),
         chat_rate_limiter=build_rate_limiter(
             limit=settings.RATE_LIMIT_PER_MINUTE,
             namespace="chat",

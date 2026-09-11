@@ -20,4 +20,5 @@ dependencies = [
     "pyjwt[crypto]>=2.13.0",
     "sentry-sdk[fastapi]>=2.60.0",
     "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
 ]

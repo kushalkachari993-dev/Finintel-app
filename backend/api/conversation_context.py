@@ -117,6 +117,12 @@ def stored_conversation_context(
         principal_id=principal_id,
         conversation_id=conversation_id
     )
+    return stored_conversation_context_from_messages(messages)
+
+
+def stored_conversation_context_from_messages(
+    messages: list[dict],
+) -> list[ConversationContextMessage]:
     context: list[ConversationContextMessage] = []
 
     for message in messages[
@@ -545,4 +551,3 @@ def contextual_query(
         context[-6:],
         query_intelligence=query_intelligence
     )
-

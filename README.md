@@ -75,6 +75,12 @@ Copy `.env.example` to `.env` and set:
 - `API_CLIENTS_JSON` optional for multiple API clients
 - `DATABASE_URL` optional, defaults to `sqlite:///data/finintel.sqlite3`
 - `AUDIT_DATABASE_PATH` optional legacy override
+- `DATABASE_POOL_MIN_SIZE` optional, defaults to `1`
+- `DATABASE_POOL_MAX_SIZE` optional, defaults to `5`
+- `DATABASE_POOL_TIMEOUT_SECONDS` optional, defaults to `10`
+- `DATABASE_OPERATION_TIMEOUT_SECONDS` optional, defaults to `10`
+- `DATABASE_CONNECT_RETRIES` optional, defaults to `3`
+- `DATABASE_CONNECT_RETRY_DELAY_SECONDS` optional, defaults to `1`
 - `CLERK_JWKS_URL` required for Clerk session JWT verification
 - `CLERK_ISSUER` required for Clerk JWT issuer validation
 - `CLERK_AUDIENCE` optional Clerk JWT audience validation
@@ -210,6 +216,7 @@ Built-in observability endpoints:
 - `GET /metrics` returns Prometheus-style metrics
 - `GET /observability` returns a JSON snapshot
 - `GET /observability/dashboard` returns a simple HTML dashboard
+- `GET /ready` verifies the database with `SELECT 1`
 
 The dashboard includes request counts, error counts, timeout counts,
 average latency, alert messages, and recent traces.
@@ -222,6 +229,10 @@ remains available as a legacy override. Stored fields include principal
 id, query, route, routing
 metadata, query intelligence, response status/error, confidence score,
 latency, and timestamp.
+
+PostgreSQL deployments use an asynchronous connection pool initialized
+and closed with the FastAPI lifespan. SQLite remains available for local
+development and tests through a non-blocking thread adapter.
 
 Users can retrieve their own recent chat history with:
 

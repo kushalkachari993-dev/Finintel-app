@@ -211,73 +211,90 @@ class ChatAuditStore:
         conversation_id: str | None = None,
         latency_ms: float | None = None
     ) -> int:
-        response_success = bool(
-            response.get(
-                "success"
-            )
-        )
-        response_error = response.get(
-            "error"
-        )
-        payload = response.get(
-            "data",
-            {}
-        ) or {}
-        confidence_score = payload.get(
-            "confidence_score"
-        )
-
         with self.connect() as connection:
             self.ensure_payload_columns(
                 connection
             )
-            cursor = connection.execute(
-                """
-                INSERT INTO chat_audit (
-                    request_id,
-                    principal_id,
-                    user_id,
-                    api_client_id,
-                    query,
-                    route,
-                    routing_json,
-                    intelligence_json,
-                    response_success,
-                    response_error,
-                    response_json,
-                    answer_detail,
-                    model,
-                    conversation_id,
-                    confidence_score,
-                    latency_ms,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    request_id,
-                    principal_id,
-                    user_id,
-                    api_client_id,
-                    query,
-                    route,
-                    self.to_json(routing),
-                    self.to_json(query_intelligence),
-                    1 if response_success else 0,
-                    response_error,
-                    self.to_json(response),
-                    answer_detail,
-                    model,
-                    conversation_id,
-                    confidence_score,
-                    latency_ms,
-                    int(time.time())
-                )
+            return self._insert_chat_audit(
+                connection,
+                request_id=request_id,
+                principal_id=principal_id,
+                user_id=user_id,
+                api_client_id=api_client_id,
+                query=query,
+                route=route,
+                routing=routing,
+                query_intelligence=query_intelligence,
+                response=response,
+                answer_detail=answer_detail,
+                model=model,
+                conversation_id=conversation_id,
+                latency_ms=latency_ms,
             )
 
-            return int(
-                cursor.lastrowid
+    def _insert_chat_audit(
+        self,
+        connection,
+        *,
+        request_id: str,
+        principal_id: str | None,
+        user_id: int | None,
+        api_client_id: str | None,
+        query: str,
+        route: str,
+        routing: dict,
+        query_intelligence: dict,
+        response: dict,
+        answer_detail: str | None,
+        model: str | None,
+        conversation_id: str | None,
+        latency_ms: float | None,
+    ) -> int:
+        payload = response.get("data", {}) or {}
+        cursor = connection.execute(
+            """
+            INSERT INTO chat_audit (
+                request_id,
+                principal_id,
+                user_id,
+                api_client_id,
+                query,
+                route,
+                routing_json,
+                intelligence_json,
+                response_success,
+                response_error,
+                response_json,
+                answer_detail,
+                model,
+                conversation_id,
+                confidence_score,
+                latency_ms,
+                created_at
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request_id,
+                principal_id,
+                user_id,
+                api_client_id,
+                query,
+                route,
+                self.to_json(routing),
+                self.to_json(query_intelligence),
+                1 if response.get("success") else 0,
+                response.get("error"),
+                self.to_json(response),
+                answer_detail,
+                model,
+                conversation_id,
+                payload.get("confidence_score"),
+                latency_ms,
+                int(time.time()),
+            ),
+        )
+        return int(cursor.lastrowid)
 
     def list_for_principal(
         self,
@@ -566,51 +583,113 @@ class ChatAuditStore:
         content: str,
         payload: dict | None = None
     ) -> int:
-        now = int(
-            time.time()
-        )
-
         with self.connect() as connection:
             self.ensure_conversation_tables(
                 connection
             )
-            cursor = connection.execute(
-                """
-                INSERT INTO chat_messages (
-                    conversation_id,
-                    principal_id,
-                    role,
-                    content,
-                    payload_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    conversation_id,
-                    principal_id,
-                    role,
-                    content,
-                    self.to_json(payload) if payload else None,
-                    now
-                )
-            )
-            connection.execute(
-                """
-                UPDATE chat_conversations
-                SET updated_at = ?
-                WHERE id = ? AND principal_id = ?
-                """,
-                (
-                    now,
-                    conversation_id,
-                    principal_id
-                )
+            return self._insert_message(
+                connection,
+                conversation_id=conversation_id,
+                principal_id=principal_id,
+                role=role,
+                content=content,
+                payload=payload,
             )
 
-            return int(
-                cursor.lastrowid
+    def _insert_message(
+        self,
+        connection,
+        *,
+        conversation_id: str,
+        principal_id: str,
+        role: str,
+        content: str,
+        payload: dict | None = None,
+    ) -> int:
+        now = int(time.time())
+        cursor = connection.execute(
+            """
+            INSERT INTO chat_messages (
+                conversation_id,
+                principal_id,
+                role,
+                content,
+                payload_json,
+                created_at
             )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                conversation_id,
+                principal_id,
+                role,
+                content,
+                self.to_json(payload) if payload else None,
+                now,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE chat_conversations
+            SET updated_at = ?
+            WHERE id = ? AND principal_id = ?
+            """,
+            (
+                now,
+                conversation_id,
+                principal_id,
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    def persist_assistant_and_audit(
+        self,
+        *,
+        conversation_id: str,
+        principal_id: str,
+        content: str,
+        payload: dict,
+        request_id: str,
+        user_id: int | None,
+        api_client_id: str | None,
+        query: str,
+        route: str,
+        routing: dict,
+        query_intelligence: dict,
+        response: dict,
+        answer_detail: str | None = None,
+        model: str | None = None,
+        latency_ms: float | None = None,
+    ) -> tuple[int, int]:
+        """Persist the assistant message and audit row in one transaction."""
+        with self.connect() as connection:
+            self.ensure_conversation_tables(connection)
+            self.ensure_payload_columns(connection)
+            message_id = self._insert_message(
+                connection,
+                conversation_id=conversation_id,
+                principal_id=principal_id,
+                role="assistant",
+                content=content,
+                payload=payload,
+            )
+            audit_id = self._insert_chat_audit(
+                connection,
+                request_id=request_id,
+                principal_id=principal_id,
+                user_id=user_id,
+                api_client_id=api_client_id,
+                query=query,
+                route=route,
+                routing=routing,
+                query_intelligence=query_intelligence,
+                response=response,
+                answer_detail=answer_detail,
+                model=model,
+                conversation_id=conversation_id,
+                latency_ms=latency_ms,
+            )
+            return message_id, audit_id
 
     def list_conversations(
         self,

@@ -1,5 +1,8 @@
+from typing import Callable
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 from fastapi.responses import PlainTextResponse
 from fastapi.responses import Response
 
@@ -63,3 +66,34 @@ def observability_dashboard():
     return HTMLResponse(
         observability.dashboard_html()
     )
+
+
+def create_system_router(
+    *,
+    get_conversation_repository: Callable,
+) -> APIRouter:
+    configured_router = APIRouter()
+    configured_router.include_router(router)
+
+    @configured_router.get("/ready")
+    async def readiness():
+        if await get_conversation_repository().ready():
+            return {
+                "status": "ok",
+                "database": "ready",
+            }
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "database": "unavailable",
+            },
+        )
+
+    @configured_router.head("/ready")
+    async def readiness_head():
+        is_ready = await get_conversation_repository().ready()
+        return Response(status_code=200 if is_ready else 503)
+
+    return configured_router

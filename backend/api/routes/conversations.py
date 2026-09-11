@@ -9,13 +9,13 @@ from backend.api.schemas import ConversationUpdateRequest
 
 def create_conversation_router(
     *,
-    get_chat_audit_store: Callable,
+    get_conversation_repository: Callable,
     get_authenticated_principal: Callable,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.get("/chat/history")
-    def chat_history(
+    async def chat_history(
         limit: int = 25,
         principal=Security(get_authenticated_principal),
     ):
@@ -24,14 +24,14 @@ def create_conversation_router(
 
         return {
             "success": True,
-            "history": get_chat_audit_store().list_for_principal(
+            "history": await get_conversation_repository().list_for_principal(
                 principal_id=principal["principal_id"],
                 limit=limit,
             ),
         }
 
     @router.get("/chat/conversations")
-    def chat_conversations(
+    async def chat_conversations(
         limit: int = 25,
         offset: int = 0,
         search: str = "",
@@ -42,7 +42,7 @@ def create_conversation_router(
 
         page_size = max(1, min(int(limit), 50))
         bounded_offset = max(0, int(offset))
-        conversations = get_chat_audit_store().list_conversations(
+        conversations = await get_conversation_repository().list_conversations(
             principal_id=principal["principal_id"],
             limit=page_size + 1,
             offset=bounded_offset,
@@ -59,15 +59,15 @@ def create_conversation_router(
         }
 
     @router.get("/chat/conversations/{conversation_id}")
-    def chat_conversation_messages(
+    async def chat_conversation_messages(
         conversation_id: str,
         principal=Security(get_authenticated_principal),
     ):
         if not principal:
             return unauthorized_response()
 
-        store = get_chat_audit_store()
-        if not store.conversation_exists(
+        repository = get_conversation_repository()
+        if not await repository.conversation_exists(
             principal_id=principal["principal_id"],
             conversation_id=conversation_id,
         ):
@@ -76,14 +76,14 @@ def create_conversation_router(
         return {
             "success": True,
             "conversation_id": conversation_id,
-            "messages": store.list_messages(
+            "messages": await repository.list_messages(
                 principal_id=principal["principal_id"],
                 conversation_id=conversation_id,
             ),
         }
 
     @router.patch("/chat/conversations/{conversation_id}")
-    def update_chat_conversation(
+    async def update_chat_conversation(
         conversation_id: str,
         update: ConversationUpdateRequest,
         principal=Security(get_authenticated_principal),
@@ -92,8 +92,8 @@ def create_conversation_router(
             return unauthorized_response()
 
         principal_id = principal["principal_id"]
-        store = get_chat_audit_store()
-        if not store.conversation_exists(
+        repository = get_conversation_repository()
+        if not await repository.conversation_exists(
             principal_id=principal_id,
             conversation_id=conversation_id,
         ):
@@ -123,14 +123,14 @@ def create_conversation_router(
             )
 
         if clean_title is not None:
-            store.rename_conversation(
+            await repository.rename_conversation(
                 principal_id=principal_id,
                 conversation_id=conversation_id,
                 title=clean_title,
             )
 
         if update.pinned is not None:
-            store.set_conversation_pinned(
+            await repository.set_conversation_pinned(
                 principal_id=principal_id,
                 conversation_id=conversation_id,
                 pinned=update.pinned,
@@ -144,14 +144,14 @@ def create_conversation_router(
         }
 
     @router.delete("/chat/conversations/{conversation_id}")
-    def delete_chat_conversation(
+    async def delete_chat_conversation(
         conversation_id: str,
         principal=Security(get_authenticated_principal),
     ):
         if not principal:
             return unauthorized_response()
 
-        deleted = get_chat_audit_store().delete_conversation(
+        deleted = await get_conversation_repository().delete_conversation(
             principal_id=principal["principal_id"],
             conversation_id=conversation_id,
         )

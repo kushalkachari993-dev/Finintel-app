@@ -33,6 +33,11 @@ class ObservabilityRegistry:
         self.status_counts = Counter()
         self.path_counts = Counter()
         self.route_counts = Counter()
+        self.database_operation_count = 0
+        self.database_error_count = 0
+        self.database_timeout_count = 0
+        self.database_total_latency_ms = 0.0
+        self.database_operation_counts = Counter()
         self.traces = deque(maxlen=max_traces)
 
     def record_request(
@@ -56,6 +61,22 @@ class ObservabilityRegistry:
 
             self.traces.appendleft(trace)
 
+    def record_database_operation(
+        self,
+        *,
+        operation: str,
+        duration_ms: float,
+        result: str,
+    ):
+        with self._lock:
+            self.database_operation_count += 1
+            self.database_total_latency_ms += duration_ms
+            self.database_operation_counts[(operation, result)] += 1
+            if result == "error":
+                self.database_error_count += 1
+            elif result == "timeout":
+                self.database_timeout_count += 1
+
     def snapshot(self):
         with self._lock:
             average_latency_ms = (
@@ -66,6 +87,12 @@ class ObservabilityRegistry:
             error_rate = (
                 self.error_count / self.request_count
                 if self.request_count
+                else 0.0
+            )
+            database_average_latency_ms = (
+                self.database_total_latency_ms
+                / self.database_operation_count
+                if self.database_operation_count
                 else 0.0
             )
 
@@ -82,6 +109,14 @@ class ObservabilityRegistry:
                 alerts.append(
                     "Provider timeout responses detected."
                 )
+            if self.database_error_count:
+                alerts.append(
+                    "Database operation errors detected."
+                )
+            if self.database_timeout_count:
+                alerts.append(
+                    "Database operation timeouts detected."
+                )
 
             return {
                 "request_count": self.request_count,
@@ -92,6 +127,20 @@ class ObservabilityRegistry:
                 "status_counts": dict(self.status_counts),
                 "path_counts": dict(self.path_counts),
                 "route_counts": dict(self.route_counts),
+                "database": {
+                    "operation_count": self.database_operation_count,
+                    "error_count": self.database_error_count,
+                    "timeout_count": self.database_timeout_count,
+                    "average_latency_ms": round(
+                        database_average_latency_ms,
+                        2,
+                    ),
+                    "operation_counts": {
+                        f"{operation}:{result}": count
+                        for (operation, result), count
+                        in self.database_operation_counts.items()
+                    },
+                },
                 "alerts": alerts,
                 "recent_traces": [
                     asdict(trace)
@@ -114,6 +163,30 @@ class ObservabilityRegistry:
             "# HELP finintel_average_latency_ms Average request latency.",
             "# TYPE finintel_average_latency_ms gauge",
             f"finintel_average_latency_ms {snapshot['average_latency_ms']}",
+            "# HELP finintel_database_operations_total Total database operations.",
+            "# TYPE finintel_database_operations_total counter",
+            (
+                "finintel_database_operations_total "
+                f"{snapshot['database']['operation_count']}"
+            ),
+            "# HELP finintel_database_errors_total Total database operation errors.",
+            "# TYPE finintel_database_errors_total counter",
+            (
+                "finintel_database_errors_total "
+                f"{snapshot['database']['error_count']}"
+            ),
+            "# HELP finintel_database_timeouts_total Total database operation timeouts.",
+            "# TYPE finintel_database_timeouts_total counter",
+            (
+                "finintel_database_timeouts_total "
+                f"{snapshot['database']['timeout_count']}"
+            ),
+            "# HELP finintel_database_average_latency_ms Average database latency.",
+            "# TYPE finintel_database_average_latency_ms gauge",
+            (
+                "finintel_database_average_latency_ms "
+                f"{snapshot['database']['average_latency_ms']}"
+            ),
         ]
 
         for status, count in snapshot["status_counts"].items():
@@ -124,6 +197,13 @@ class ObservabilityRegistry:
         for route, count in snapshot["route_counts"].items():
             lines.append(
                 f'finintel_chat_routes_total{{route="{route}"}} {count}'
+            )
+
+        for key, count in snapshot["database"]["operation_counts"].items():
+            operation, result = key.split(":", 1)
+            lines.append(
+                "finintel_database_operations_by_result_total"
+                f'{{operation="{operation}",result="{result}"}} {count}'
             )
 
         return "\n".join(lines) + "\n"
@@ -168,6 +248,13 @@ class ObservabilityRegistry:
             <div class="card">Errors<strong>{snapshot['error_count']}</strong></div>
             <div class="card">Timeouts<strong>{snapshot['timeout_count']}</strong></div>
             <div class="card">Avg latency<strong>{snapshot['average_latency_ms']} ms</strong></div>
+          </div>
+          <h2>Database</h2>
+          <div class="grid">
+            <div class="card">Operations<strong>{snapshot['database']['operation_count']}</strong></div>
+            <div class="card">Errors<strong>{snapshot['database']['error_count']}</strong></div>
+            <div class="card">Timeouts<strong>{snapshot['database']['timeout_count']}</strong></div>
+            <div class="card">Avg latency<strong>{snapshot['database']['average_latency_ms']} ms</strong></div>
           </div>
           <h2>Alerts</h2>
           <ul>{alert_markup}</ul>

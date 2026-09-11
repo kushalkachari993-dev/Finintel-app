@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -16,12 +17,12 @@ from backend.api.routes.research import research_request_metadata
 from backend.api.routes.research import sse_event
 from backend.api.routes.system import health
 from backend.api.routes.system import health_head
+from backend.api.routes.system import create_system_router
 from backend.api.routes.system import metrics
 from backend.api.routes.system import observability_dashboard
 from backend.api.routes.system import observability_snapshot
 from backend.api.routes.system import root
 from backend.api.routes.system import root_head
-from backend.api.routes.system import router as system_router
 from backend.api.schemas import ChatRequest
 from backend.api.schemas import ConversationContextMessage
 from backend.api.schemas import ConversationUpdateRequest
@@ -30,6 +31,7 @@ from backend.config import settings
 from backend.security import APIKeyAuthenticator
 from backend.security import ClerkAuthenticator
 from backend.services import ResearchService
+from backend.storage import build_conversation_repository
 from backend.utils.logging_config import configure_logging
 from backend.observability.sentry import init_sentry
 
@@ -55,6 +57,22 @@ chat_rate_limiter = dependencies.chat_rate_limiter
 api_key_authenticator = dependencies.api_key_authenticator
 clerk_authenticator = dependencies.clerk_authenticator
 api_key_header = dependencies.api_key_header
+
+conversation_repository = build_conversation_repository(
+    database_url=settings.AUDIT_DATABASE_URL,
+    database_path=settings.AUDIT_DATABASE_PATH,
+    store_provider=lambda: chat_audit_store,
+    min_pool_size=settings.DATABASE_POOL_MIN_SIZE,
+    max_pool_size=settings.DATABASE_POOL_MAX_SIZE,
+    pool_timeout_seconds=settings.DATABASE_POOL_TIMEOUT_SECONDS,
+    operation_timeout_seconds=(
+        settings.DATABASE_OPERATION_TIMEOUT_SECONDS
+    ),
+    connect_retries=settings.DATABASE_CONNECT_RETRIES,
+    retry_delay_seconds=(
+        settings.DATABASE_CONNECT_RETRY_DELAY_SECONDS
+    ),
+)
 
 response_context_text = context_tools.response_context_text
 build_generation_context = context_tools.build_generation_context
@@ -86,6 +104,24 @@ def conversation_context_for_request(
         client_context=client_context,
         chat_audit_store=chat_audit_store,
     )
+
+
+async def async_conversation_context_for_request(
+    *,
+    principal_id: str,
+    conversation_id: str,
+    client_context: list[ConversationContextMessage],
+) -> list[ConversationContextMessage]:
+    messages = await conversation_repository.list_messages(
+        principal_id=principal_id,
+        conversation_id=conversation_id,
+    )
+    stored_context = (
+        context_tools.stored_conversation_context_from_messages(messages)
+    )
+    if stored_context:
+        return stored_context
+    return client_context[-context_tools.CONVERSATION_CONTEXT_MESSAGE_LIMIT:]
 
 
 def context_companies(
@@ -130,8 +166,10 @@ def build_research_service() -> ResearchService:
         news_agent=news_agent,
         report_agent=report_agent,
         query_intelligence=query_intelligence,
-        chat_audit_store=chat_audit_store,
-        conversation_context_for_request=conversation_context_for_request,
+        conversation_repository=conversation_repository,
+        conversation_context_for_request=(
+            async_conversation_context_for_request
+        ),
         contextual_query=contextual_query,
         build_generation_context=build_generation_context,
         is_follow_up_query=is_follow_up_query,
@@ -142,8 +180,12 @@ def build_research_service() -> ResearchService:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = app
-    settings.validate_required_settings()
-    yield
+    await asyncio.to_thread(settings.validate_required_settings)
+    await conversation_repository.start()
+    try:
+        yield
+    finally:
+        await conversation_repository.close()
 
 
 app = FastAPI(
@@ -169,8 +211,12 @@ get_authenticated_principal = (
 )
 
 conversation_router = create_conversation_router(
-    get_chat_audit_store=lambda: chat_audit_store,
+    get_conversation_repository=lambda: conversation_repository,
     get_authenticated_principal=get_authenticated_principal,
+)
+
+system_router = create_system_router(
+    get_conversation_repository=lambda: conversation_repository,
 )
 
 RESEARCH_HEARTBEAT_SECONDS = 15

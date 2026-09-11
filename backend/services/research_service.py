@@ -6,6 +6,7 @@ from typing import Literal
 
 from backend.config import settings
 from backend.llm.model_selector import select_groq_model
+from backend.storage import ConversationRepositoryError
 from backend.utils.async_execution import run_blocking
 from backend.utils.financial_guardrails import apply_financial_guardrails
 
@@ -53,7 +54,7 @@ class ResearchService:
         news_agent,
         report_agent,
         query_intelligence,
-        chat_audit_store,
+        conversation_repository,
         conversation_context_for_request: Callable,
         contextual_query: Callable,
         build_generation_context: Callable,
@@ -69,7 +70,7 @@ class ResearchService:
         self.news_agent = news_agent
         self.report_agent = report_agent
         self.query_intelligence = query_intelligence
-        self.chat_audit_store = chat_audit_store
+        self.conversation_repository = conversation_repository
         self.conversation_context_for_request = (
             conversation_context_for_request
         )
@@ -182,7 +183,7 @@ class ResearchService:
             )
 
         try:
-            conversation_id = self._resolve_conversation(
+            conversation_id = await self._resolve_conversation(
                 principal_id=principal_id,
                 conversation_id=conversation_id,
                 title=user_query,
@@ -194,7 +195,7 @@ class ResearchService:
                 conversation_id=conversation_id,
             )
             conversation_context = (
-                self.conversation_context_for_request(
+                await self.conversation_context_for_request(
                     principal_id=principal_id,
                     conversation_id=conversation_id,
                     client_context=client_context,
@@ -206,7 +207,7 @@ class ResearchService:
                 message="Conversation context loaded.",
                 message_count=len(conversation_context),
             )
-            self.chat_audit_store.add_message(
+            await self.conversation_repository.add_message(
                 conversation_id=conversation_id,
                 principal_id=principal_id,
                 role="user",
@@ -364,7 +365,7 @@ class ResearchService:
                 "response": response,
             }
 
-            self._persist_success(
+            await self._persist_success(
                 final_response=final_response,
                 response=response,
                 mode=mode,
@@ -408,6 +409,34 @@ class ResearchService:
                 route=route,
             )
 
+        except ConversationRepositoryError:
+            message = "Research storage is temporarily unavailable."
+            logger.exception(
+                "research_persistence_failed mode=%s query=%r route=%s",
+                mode,
+                user_query,
+                route,
+            )
+            self._emit_progress(
+                on_progress,
+                "failed",
+                message=message,
+                status_code=503,
+                route=route,
+            )
+            return ResearchOutcome(
+                payload=self._error_payload(
+                    message=message,
+                    user_query=user_query,
+                    answer_detail=answer_detail,
+                    route=route,
+                    routing_result=routing_result,
+                    intelligence=intelligence,
+                ),
+                status_code=503,
+                route=route,
+            )
+
         except TimeoutError:
             message = (
                 "Request timed out while waiting for external providers."
@@ -418,7 +447,7 @@ class ResearchService:
                 user_query,
                 route,
             )
-            self._persist_failure(
+            await self._persist_failure(
                 message=message,
                 user_query=user_query,
                 answer_detail=answer_detail,
@@ -460,7 +489,7 @@ class ResearchService:
                 route,
             )
             message = str(error)
-            self._persist_failure(
+            await self._persist_failure(
                 message=message,
                 user_query=user_query,
                 answer_detail=answer_detail,
@@ -519,7 +548,7 @@ class ResearchService:
                 stage,
             )
 
-    def _resolve_conversation(
+    async def _resolve_conversation(
         self,
         *,
         principal_id: str,
@@ -527,7 +556,7 @@ class ResearchService:
         title: str,
     ) -> str:
         if conversation_id:
-            if not self.chat_audit_store.conversation_exists(
+            if not await self.conversation_repository.conversation_exists(
                 principal_id=principal_id,
                 conversation_id=conversation_id,
             ):
@@ -535,7 +564,7 @@ class ResearchService:
 
             return conversation_id
 
-        return self.chat_audit_store.create_conversation(
+        return await self.conversation_repository.create_conversation(
             principal_id=principal_id,
             title=title,
         )
@@ -636,7 +665,7 @@ class ResearchService:
 
         return route, routing_result, model, response
 
-    def _persist_success(
+    async def _persist_success(
         self,
         *,
         final_response: dict,
@@ -648,10 +677,9 @@ class ResearchService:
         conversation_id: str,
         started_at: float,
     ):
-        self.chat_audit_store.add_message(
+        await self.conversation_repository.persist_assistant_and_audit(
             conversation_id=conversation_id,
             principal_id=principal_id,
-            role="assistant",
             content=(
                 self.response_context_text(response)
                 or (
@@ -661,18 +689,23 @@ class ResearchService:
                 )
             ),
             payload=final_response,
-        )
-        self._record_chat(
-            final_response=final_response,
+            query=final_response["query"],
+            route=final_response["route"],
+            routing=final_response["routing"],
+            query_intelligence=final_response["query_intelligence"],
             response=response,
-            principal_id=principal_id,
+            answer_detail=final_response["answer_detail"],
+            model=final_response["model"],
             request_id=request_id,
+            user_id=None,
             api_client_id=api_client_id,
-            conversation_id=conversation_id,
-            started_at=started_at,
+            latency_ms=round(
+                (time.perf_counter() - started_at) * 1000,
+                2,
+            ),
         )
 
-    def _persist_failure(
+    async def _persist_failure(
         self,
         *,
         message: str,
@@ -708,59 +741,31 @@ class ResearchService:
         }
 
         try:
-            self.chat_audit_store.add_message(
+            await self.conversation_repository.persist_assistant_and_audit(
                 conversation_id=conversation_id,
                 principal_id=principal_id,
-                role="assistant",
                 content=message,
                 payload=final_response,
-            )
-            self._record_chat(
-                final_response=final_response,
+                query=final_response["query"],
+                route=final_response["route"],
+                routing=final_response["routing"],
+                query_intelligence=final_response["query_intelligence"],
                 response=response,
-                principal_id=principal_id,
+                answer_detail=final_response["answer_detail"],
+                model=final_response["model"],
                 request_id=request_id,
+                user_id=None,
                 api_client_id=api_client_id,
-                conversation_id=conversation_id,
-                started_at=started_at,
+                latency_ms=round(
+                    (time.perf_counter() - started_at) * 1000,
+                    2,
+                ),
             )
         except Exception:
             logger.exception(
                 "research_failure_persistence_failed request_id=%s",
                 request_id,
             )
-
-    def _record_chat(
-        self,
-        *,
-        final_response: dict,
-        response: dict,
-        principal_id: str,
-        request_id: str,
-        api_client_id: str | None,
-        conversation_id: str,
-        started_at: float,
-    ):
-        self.chat_audit_store.record_chat(
-            request_id=request_id,
-            principal_id=principal_id,
-            user_id=None,
-            api_client_id=api_client_id,
-            query=final_response["query"],
-            route=final_response["route"],
-            routing=final_response["routing"],
-            query_intelligence=(
-                final_response["query_intelligence"]
-            ),
-            response=response,
-            answer_detail=final_response["answer_detail"],
-            model=final_response["model"],
-            conversation_id=conversation_id,
-            latency_ms=round(
-                (time.perf_counter() - started_at) * 1000,
-                2,
-            ),
-        )
 
     @staticmethod
     def _error_payload(
