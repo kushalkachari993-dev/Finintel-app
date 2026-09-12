@@ -196,11 +196,11 @@ Frontend:
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
 ```
 
-Use `pk_test_...` only for local development. Render sets
-`VITE_APP_ENV=production`, and production builds intentionally reject a
-Clerk development key. Configure `VITE_CLERK_PUBLISHABLE_KEY=pk_live_...`
-in the frontend service and use the matching production instance for the
-backend `CLERK_JWKS_URL` and `CLERK_ISSUER` values.
+The current Render deployment may use a Clerk development instance while the
+project has no production domain. Clerk will display a development-key warning
+and enforce development-instance limits. When a domain is available, migrate
+the frontend key and backend `CLERK_JWKS_URL` and `CLERK_ISSUER` together to
+the matching production Clerk instance.
 
 Backend:
 
