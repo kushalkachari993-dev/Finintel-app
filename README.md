@@ -196,6 +196,12 @@ Frontend:
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
 ```
 
+Use `pk_test_...` only for local development. Render sets
+`VITE_APP_ENV=production`, and production builds intentionally reject a
+Clerk development key. Configure `VITE_CLERK_PUBLISHABLE_KEY=pk_live_...`
+in the frontend service and use the matching production instance for the
+backend `CLERK_JWKS_URL` and `CLERK_ISSUER` values.
+
 Backend:
 
 ```env

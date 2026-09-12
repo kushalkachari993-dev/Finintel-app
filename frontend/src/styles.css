@@ -103,6 +103,8 @@ h4,
 .metric-card strong,
 .stat-pill strong,
 .breakdown-item strong,
+.price-quote-value,
+.price-change,
 .investment-snapshot-item-confidence strong,
 .investment-snapshot-item-sources strong,
 .comparison-table td,
@@ -545,6 +547,11 @@ h4,
   padding: 24px clamp(18px, 5vw, 72px) 150px;
 }
 
+.chat-thread-empty {
+  align-items: center;
+  display: grid;
+}
+
 .welcome-panel,
 .message-row,
 .result-shell,
@@ -625,6 +632,10 @@ h4,
   font-size: 14px;
   line-height: 1.35;
   margin-top: 8px;
+}
+
+.welcome-query-hint {
+  display: none;
 }
 
 .welcome-panel .trust-strip {
@@ -1516,6 +1527,162 @@ h1 {
   font-size: 17px;
   line-height: 1.6;
   margin: 10px 0 0;
+}
+
+.price-quote-card {
+  background:
+    linear-gradient(135deg, rgba(36, 191, 166, 0.1), transparent 45%),
+    var(--fi-surface);
+  border: 1px solid #bdd8d0;
+  border-top: 4px solid var(--fi-green);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px rgba(18, 33, 28, 0.1);
+  margin-bottom: 16px;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.price-quote-card-unavailable {
+  background:
+    linear-gradient(135deg, rgba(187, 62, 62, 0.08), transparent 45%),
+    var(--fi-surface);
+  border-color: #e4c6c4;
+  border-top-color: var(--fi-red);
+}
+
+.price-quote-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.price-quote-header > div > span {
+  color: var(--fi-green);
+  display: block;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.price-quote-header h3 {
+  color: var(--fi-ink);
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.1;
+  margin: 5px 0 0;
+}
+
+.price-quote-header p {
+  color: var(--fi-muted);
+  font-size: 13px;
+  font-weight: 800;
+  margin: 6px 0 0;
+}
+
+.price-market-status {
+  background: var(--fi-mint-soft);
+  border-radius: 999px;
+  color: var(--fi-green);
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 7px 10px;
+}
+
+.price-quote-card-unavailable .price-market-status {
+  background: var(--fi-red-soft);
+  color: var(--fi-red);
+}
+
+.price-quote-value-row {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 18px;
+}
+
+.price-quote-value {
+  color: var(--fi-ink);
+  font-size: clamp(34px, 6vw, 54px);
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.price-change {
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 900;
+  padding: 6px 8px;
+}
+
+.price-change-positive {
+  background: var(--fi-mint-soft);
+  color: #087261;
+}
+
+.price-change-negative {
+  background: var(--fi-red-soft);
+  color: var(--fi-red);
+}
+
+.price-change-neutral {
+  background: #edf3f1;
+  color: var(--fi-muted);
+}
+
+.price-quote-meta {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 20px 0 0;
+  overflow: hidden;
+}
+
+.price-quote-meta > div {
+  background: rgba(244, 249, 247, 0.88);
+  border-top: 1px solid var(--fi-line);
+  min-width: 0;
+  padding: 12px;
+}
+
+.price-quote-meta dt {
+  color: var(--fi-muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.price-quote-meta dd {
+  color: var(--fi-ink);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.price-quote-footer {
+  align-items: center;
+  border-top: 1px solid var(--fi-line);
+  color: var(--fi-muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.price-quote-footer a {
+  color: var(--fi-green);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.price-quote-footer a:hover {
+  text-decoration: underline;
 }
 
 .investment-snapshot {
@@ -3221,6 +3388,10 @@ h1 {
     width: 100%;
   }
 
+  .chat-thread-empty {
+    align-items: start;
+  }
+
   .welcome-panel {
     margin: 12px auto 18px;
     text-align: left;
@@ -3356,6 +3527,10 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .price-quote-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .report-metric-strip,
   .report-three-grid,
   .report-two-grid {
@@ -3455,6 +3630,33 @@ h1 {
     flex: 0 0 min(278px, 82vw);
     min-height: 82px;
     scroll-snap-align: start;
+  }
+
+  .welcome-query-hint {
+    color: var(--fi-green);
+    display: block;
+    font-size: 11px;
+    font-weight: 900;
+    margin: 2px 0 10px;
+    text-align: right;
+  }
+
+  .price-quote-card {
+    padding: 15px;
+  }
+
+  .price-quote-header,
+  .price-quote-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .price-quote-value {
+    font-size: 36px;
+  }
+
+  .price-quote-meta {
+    grid-template-columns: 1fr;
   }
 
   .source-section-compact {

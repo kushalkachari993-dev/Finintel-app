@@ -214,6 +214,17 @@ class StockDataTool:
                 or info.get("regularMarketPrice")
             )
 
+            market_state = str(
+                info.get("marketState")
+                or ""
+            ).upper()
+
+            is_market_open = (
+                market_state == "REGULAR"
+                if market_state
+                else None
+            )
+
             market_cap = (
                 info.get("marketCap")
             )
@@ -432,6 +443,33 @@ class StockDataTool:
 
                 "currency":
                 info.get("currency") or "INR",
+
+                "exchange":
+                info.get("exchange"),
+
+                "previous_close":
+                info.get("regularMarketPreviousClose"),
+
+                "day_open":
+                info.get("regularMarketOpen"),
+
+                "day_high":
+                info.get("regularMarketDayHigh"),
+
+                "day_low":
+                info.get("regularMarketDayLow"),
+
+                "volume":
+                info.get("regularMarketVolume"),
+
+                "change":
+                info.get("regularMarketChange"),
+
+                "percent_change":
+                info.get("regularMarketChangePercent"),
+
+                "is_market_open":
+                is_market_open,
 
                 "provider":
                 "yfinance",

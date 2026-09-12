@@ -82,6 +82,18 @@ class PriceAgent:
             "currency":
             "INR",
 
+            "provider":
+            None,
+
+            "price_freshness":
+            None,
+
+            "source_url":
+            None,
+
+            "retrieved_at":
+            None,
+
             "confidence_score":
             fallback_confidence,
 
@@ -439,6 +451,59 @@ class PriceAgent:
 
             "currency":
             currency,
+
+            "exchange":
+            stock_data.get("exchange"),
+
+            "provider":
+            provider,
+
+            "price_freshness":
+            stock_data.get("price_freshness"),
+
+            "price_date":
+            stock_data.get("price_date"),
+
+            "source_url":
+            (
+                stock_data.get("source_url")
+                or (
+                    f"https://finance.yahoo.com/quote/{ticker}"
+                    if provider == "yfinance"
+                    else (
+                        "https://twelvedata.com/"
+                        if provider == "twelve_data"
+                        else None
+                    )
+                )
+            ),
+
+            "retrieved_at":
+            stock_data.get("retrieved_at"),
+
+            "previous_close":
+            stock_data.get("previous_close"),
+
+            "day_open":
+            stock_data.get("day_open"),
+
+            "day_high":
+            stock_data.get("day_high"),
+
+            "day_low":
+            stock_data.get("day_low"),
+
+            "volume":
+            stock_data.get("volume"),
+
+            "change":
+            stock_data.get("change"),
+
+            "percent_change":
+            stock_data.get("percent_change"),
+
+            "is_market_open":
+            stock_data.get("is_market_open"),
 
             "confidence_score":
             response_confidence,

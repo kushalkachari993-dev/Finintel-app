@@ -227,13 +227,94 @@ function formatPrice(value: unknown, currency = "INR") {
   }
 
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return value || "Unavailable";
+  if (!Number.isFinite(numeric)) return asString(value, "Unavailable");
 
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency,
     maximumFractionDigits: 2,
   }).format(numeric);
+}
+
+function asFiniteNumber(value: unknown) {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") {
+    return null;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatSignedPrice(value: unknown, currency = "INR") {
+  const numeric = asFiniteNumber(value);
+  if (numeric === null) return "";
+
+  const formatted = new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(numeric));
+
+  return `${numeric >= 0 ? "+" : "−"}${formatted}`;
+}
+
+function formatSignedPercent(value: unknown) {
+  const numeric = asFiniteNumber(value);
+  if (numeric === null) return "";
+  return `${numeric >= 0 ? "+" : "−"}${Math.abs(numeric).toFixed(2)}%`;
+}
+
+function formatCompactNumber(value: unknown) {
+  const numeric = asFiniteNumber(value);
+  if (numeric === null) return "Unavailable";
+
+  return new Intl.NumberFormat("en-IN", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(numeric);
+}
+
+function formatQuoteTime(value: unknown) {
+  const raw = asString(value);
+  if (!raw) return "Not provided";
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function providerLabel(value: unknown) {
+  const provider = asString(value).toLowerCase();
+  const labels: Record<string, string> = {
+    yfinance: "Yahoo Finance",
+    twelve_data: "Twelve Data",
+    alpha_vantage: "Alpha Vantage",
+    gemini_grounded_search: "Google-grounded search",
+    tavily_web_search: "Trusted web search",
+  };
+
+  return labels[provider] || (provider ? provider.replaceAll("_", " ") : "Not provided");
+}
+
+function freshnessLabel(payload: Record<string, unknown>) {
+  if (payload.price_date) {
+    return `Closing price · ${asString(payload.price_date)}`;
+  }
+
+  const freshness = asString(payload.price_freshness).toLowerCase();
+  if (freshness === "live_or_delayed") return "Live or delayed quote";
+  if (freshness === "end_of_day") return "End-of-day quote";
+  if (payload.is_market_open === true) return "Market open";
+  if (payload.is_market_open === false) return "Latest available quote";
+  return freshness ? freshness.replaceAll("_", " ") : "Freshness not provided";
 }
 
 function sourceDomain(source: string) {
@@ -446,14 +527,10 @@ function messagesFromStoredConversation(
 }
 
 function getConfidenceScore(
-  payload: Record<string, unknown>,
-  result: ApiResult | null
+  payload: Record<string, unknown>
 ) {
   const payloadScore = Number(payload.confidence_score);
   if (Number.isFinite(payloadScore) && payloadScore > 0) return payloadScore;
-
-  const routingScore = Number(result?.routing?.confidence);
-  if (Number.isFinite(routingScore) && routingScore > 0) return routingScore;
 
   return 0;
 }
@@ -1802,6 +1879,106 @@ function ReportTextCard({
   );
 }
 
+function PriceQuoteCard({
+  payload,
+  score,
+  sourceCount,
+}: {
+  payload: Record<string, unknown>;
+  score: number;
+  sourceCount: number;
+}) {
+  const currency = asString(payload.currency, "INR");
+  const numericPrice = asFiniteNumber(payload.current_price);
+  const hasPrice = numericPrice !== null && numericPrice > 0;
+  const change = asFiniteNumber(payload.change);
+  const percentChange = asFiniteNumber(payload.percent_change);
+  const changeTone = (percentChange ?? change ?? 0) > 0
+    ? "positive"
+    : (percentChange ?? change ?? 0) < 0
+      ? "negative"
+      : "neutral";
+  const sourceUrl = (() => {
+    try {
+      const url = new URL(asString(payload.source_url));
+      return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+    } catch {
+      return "";
+    }
+  })();
+  const asOf = payload.price_date
+    ? asString(payload.price_date)
+    : formatQuoteTime(payload.retrieved_at);
+  const marketStatus = !hasPrice
+    ? "Quote unavailable"
+    : payload.is_market_open === true
+      ? "Market open"
+      : payload.is_market_open === false
+        ? "Latest available"
+        : freshnessLabel(payload);
+
+  return (
+    <section
+      className={`price-quote-card ${hasPrice ? "" : "price-quote-card-unavailable"}`}
+      aria-label="Price quote"
+    >
+      <header className="price-quote-header">
+        <div>
+          <span>Market quote</span>
+          <h3>{getPayloadTitle("PRICE_QUERY", payload)}</h3>
+          <p>
+            {[asString(payload.ticker), asString(payload.exchange)]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
+        <strong className="price-market-status">{marketStatus}</strong>
+      </header>
+
+      <div className="price-quote-value-row">
+        <strong className="price-quote-value">
+          {formatPrice(payload.current_price, currency)}
+        </strong>
+        {hasPrice && (change !== null || percentChange !== null) && (
+          <span className={`price-change price-change-${changeTone}`}>
+            {[formatSignedPrice(change, currency), formatSignedPercent(percentChange)]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        )}
+      </div>
+
+      <dl className="price-quote-meta">
+        <div>
+          <dt>Data provider</dt>
+          <dd>{providerLabel(payload.provider)}</dd>
+        </div>
+        <div>
+          <dt>Price as of</dt>
+          <dd>{asOf}</dd>
+        </div>
+        <div>
+          <dt>Data confidence</dt>
+          <dd>{hasPrice && score > 0 ? `${formatPercent(score)} · ${confidenceLabel(score)}` : "Unavailable"}</dd>
+        </div>
+        <div>
+          <dt>Evidence</dt>
+          <dd>{sourceCount ? `${sourceCount} linked source${sourceCount === 1 ? "" : "s"}` : "Provider metadata only"}</dd>
+        </div>
+      </dl>
+
+      <footer className="price-quote-footer">
+        <span>{freshnessLabel(payload)}</span>
+        {sourceUrl && (
+          <a href={sourceUrl} target="_blank" rel="noreferrer">
+            View quote source <span aria-hidden="true">↗</span>
+          </a>
+        )}
+      </footer>
+    </section>
+  );
+}
+
 function ResultBody({
   route,
   payload,
@@ -1949,14 +2126,22 @@ function ResultBody({
   if (route === "PRICE_QUERY") {
     return (
       <>
-        <Panel title="Current Trading Information" tone="blue">
+        <Panel title="Quote context" tone="blue">
           {payload.message}
         </Panel>
-        <div className="metric-grid">
+        <div className="metric-grid price-detail-grid">
+          <Metric label="Previous Close" value={formatPrice(payload.previous_close, asString(payload.currency, "INR"))} />
+          <Metric label="Day Open" value={formatPrice(payload.day_open, asString(payload.currency, "INR"))} />
           <Metric
-            label="Current Price"
-            value={formatPrice(payload.current_price, asString(payload.currency, "INR"))}
+            label="Day Range"
+            value={
+              payload.day_low !== null && payload.day_low !== undefined
+              && payload.day_high !== null && payload.day_high !== undefined
+                ? `${formatPrice(payload.day_low, asString(payload.currency, "INR"))} – ${formatPrice(payload.day_high, asString(payload.currency, "INR"))}`
+                : "Unavailable"
+            }
           />
+          <Metric label="Volume" value={formatCompactNumber(payload.volume)} />
           <Metric label="P/E Ratio" value={payload.pe_ratio} />
           <Metric label="Market Cap" value={payload.market_cap} />
           <Metric label="Sector" value={payload.sector} />
@@ -2137,7 +2322,7 @@ function InvestmentSnapshot({
     },
     {
       key: "confidence",
-      label: "Confidence",
+      label: "Analysis confidence",
       value: hasConfidence
         ? `${confidencePercent}% (${confidenceLabel(score)})`
         : "Not provided",
@@ -2200,7 +2385,7 @@ function InvestmentSnapshot({
           <strong>{evidenceLabel}</strong>
           <small>
             {sourceCount ? `${sourceCount} linked source${sourceCount === 1 ? "" : "s"}` : "No linked sources"}
-            {hasConfidence ? ` · ${confidencePercent}% confidence` : " · Confidence unavailable"}
+            {hasConfidence ? ` · ${confidencePercent}% analysis confidence` : " · Analysis confidence unavailable"}
             {dataQuality.label ? ` · ${asString(dataQuality.label)} data` : ""}
           </small>
         </div>
@@ -2225,9 +2410,14 @@ function AssistantResultMessage({
   const sourcesRef = useRef<HTMLDivElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const payload = result.response?.data || {};
-  const score = getConfidenceScore(payload, result);
-  const sourceCount = asList(payload.sources_used || payload.sources).length;
-  const sources = payload.sources_used || payload.sources;
+  const score = getConfidenceScore(payload);
+  const sources = Array.from(new Set([
+    ...asList(payload.sources_used),
+    ...asList(payload.sources),
+    ...asList(payload.source_url),
+  ]));
+  const sourceCount = sources.length;
+  const isPriceQuery = result.route === "PRICE_QUERY";
   const isReport = mode === "report";
   const canExport =
     isReport
@@ -2264,19 +2454,27 @@ function AssistantResultMessage({
       ref={exportRef}
     >
       <div className="result-section-anchor" ref={snapshotRef}>
-        <InvestmentSnapshot
-          route={result.route}
-          payload={payload}
-          score={score}
-          sourceCount={sourceCount}
-          canExport={canExport}
-          exporting={exporting}
-          onExportPdf={handleExportPdf}
-        />
+        {isPriceQuery ? (
+          <PriceQuoteCard
+            payload={payload}
+            score={score}
+            sourceCount={sourceCount}
+          />
+        ) : (
+          <InvestmentSnapshot
+            route={result.route}
+            payload={payload}
+            score={score}
+            sourceCount={sourceCount}
+            canExport={canExport}
+            exporting={exporting}
+            onExportPdf={handleExportPdf}
+          />
+        )}
       </div>
       <div className="result-section-nav" role="navigation" aria-label="Result sections">
         <button type="button" onClick={() => scrollToSection(snapshotRef)}>
-          Snapshot
+          {isPriceQuery ? "Quote" : "Snapshot"}
         </button>
         <button type="button" onClick={() => scrollToSection(analysisRef)}>
           Analysis
@@ -2316,7 +2514,14 @@ function AssistantResultMessage({
         </p>
         <div className="result-meta">
           <StatPill label="Route" value={routeLabel(result.route)} />
-          <StatPill label="Linked evidence" value={sourceCount ? sourceCount : "Evidence unavailable"} />
+          <StatPill
+            label="Linked evidence"
+            value={sourceCount ? sourceCount : payload.provider ? "Provider identified" : "Evidence unavailable"}
+          />
+          <StatPill
+            label={isPriceQuery ? "Data confidence" : "Analysis confidence"}
+            value={score > 0 ? formatPercent(score) : "Not provided"}
+          />
           <StatPill label="Routing confidence" value={formatPercent(result.routing?.confidence)} />
         </div>
       </section>
@@ -2359,7 +2564,10 @@ export default function App({
 }: {
   externalAuth: ExternalAuth;
 }) {
-  const [query, setQuery] = useState("");
+  const [queryDrafts, setQueryDrafts] = useState<Record<WorkMode, string>>({
+    chat: "",
+    report: "",
+  });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
@@ -2385,6 +2593,7 @@ export default function App({
         email: externalAuth.email,
       }
     : null;
+  const query = queryDrafts[workMode];
 
   const modeCopy = MODE_COPY[workMode];
   const modeExamples = workMode === "report" ? REPORT_EXAMPLES : EXAMPLES;
@@ -2421,8 +2630,31 @@ export default function App({
   const resultRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const authDialogRef = useRef<HTMLElement | null>(null);
+  const authReturnFocusRef = useRef<HTMLElement | null>(null);
   const mobileNavToggleRef = useRef<HTMLButtonElement | null>(null);
   const mobileNavCloseRef = useRef<HTMLButtonElement | null>(null);
+
+  function setActiveQuery(value: string) {
+    setQueryDrafts((current) => ({
+      ...current,
+      [workMode]: value,
+    }));
+  }
+
+  function clearQueryDrafts() {
+    setQueryDrafts({ chat: "", report: "" });
+  }
+
+  function openAuthDialog() {
+    authReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setAuthOpen(true);
+  }
+
+  function closeAuthDialog() {
+    setAuthOpen(false);
+  }
 
   useEffect(() => {
     if (messages.length || loading || error) {
@@ -2439,9 +2671,35 @@ export default function App({
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    function closeOnEscape(event: KeyboardEvent) {
+    function handleDialogKeyboard(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setAuthOpen(false);
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        authDialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ) || []
+      ).filter((element) => element.getClientRects().length > 0);
+
+      if (!focusable.length) {
+        event.preventDefault();
+        authDialogRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     }
 
@@ -2452,12 +2710,18 @@ export default function App({
       target?.focus();
     }, 0);
 
-    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", handleDialogKeyboard);
 
     return () => {
       document.body.style.overflow = previousBodyOverflow;
       window.clearTimeout(focusTimer);
-      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("keydown", handleDialogKeyboard);
+
+      const returnTarget = authReturnFocusRef.current;
+      authReturnFocusRef.current = null;
+      if (returnTarget?.isConnected) {
+        window.requestAnimationFrame(() => returnTarget.focus());
+      }
     };
   }, [authOpen]);
 
@@ -2471,7 +2735,7 @@ export default function App({
     }, 240);
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !authDialogRef.current) {
         setMobileNavOpen(false);
       }
     }
@@ -2589,7 +2853,7 @@ export default function App({
   }
 
   function selectExample(example: string) {
-    setQuery(example);
+    setActiveQuery(example);
     setMobileNavOpen(false);
     requestAnimationFrame(() => composerInputRef.current?.focus());
   }
@@ -2600,7 +2864,7 @@ export default function App({
       authToken,
       item.conversation_id
     );
-    setQuery("");
+    clearQueryDrafts();
     setError("");
     setCurrentConversationId(item.conversation_id);
     setMessages(messagesFromStoredConversation(storedMessages));
@@ -2707,7 +2971,7 @@ export default function App({
 
     if (!authToken) {
       setError("Please sign in with Clerk before asking FinIntel.");
-      setAuthOpen(true);
+      openAuthDialog();
       return;
     }
 
@@ -2719,7 +2983,7 @@ export default function App({
     setLoading(true);
     setError("");
     setProgressEvents([]);
-    setQuery("");
+    setActiveQuery("");
     setMessages((current) => [
       ...current,
       {
@@ -2795,6 +3059,7 @@ export default function App({
           className="mobile-nav-backdrop"
           type="button"
           aria-label="Close research navigation"
+          inert={authOpen ? true : undefined}
           onClick={() => setMobileNavOpen(false)}
         />
       )}
@@ -2803,6 +3068,7 @@ export default function App({
         className={`chat-sidebar ${mobileNavOpen ? "mobile-nav-open" : ""}`}
         id="research-navigation"
         aria-label="Research navigation"
+        inert={authOpen ? true : undefined}
       >
         <div className="sidebar-header">
           <div className="brand">
@@ -2841,7 +3107,7 @@ export default function App({
           className="new-chat-button"
           type="button"
           onClick={() => {
-            setQuery("");
+            clearQueryDrafts();
             setMessages([]);
             setError("");
             setCurrentConversationId("");
@@ -3056,7 +3322,7 @@ export default function App({
                   : "Sign in to save your research history."}
               </p>
               {!displayedUser && (
-                <button type="button" onClick={() => setAuthOpen(true)}>
+                <button type="button" onClick={openAuthDialog}>
                   Open account
                 </button>
               )}
@@ -3065,7 +3331,10 @@ export default function App({
         </section>
       </aside>
 
-      <section className="chat-main" inert={mobileNavOpen ? true : undefined}>
+      <section
+        className="chat-main"
+        inert={mobileNavOpen || authOpen ? true : undefined}
+      >
         <header className="chat-topbar">
           <button
             className="mobile-nav-toggle"
@@ -3101,7 +3370,7 @@ export default function App({
             <button
               className="nav-auth-button"
               type="button"
-              onClick={() => setAuthOpen(true)}
+              onClick={openAuthDialog}
               aria-label={
                 displayedUser
                   ? `Open account menu for ${displayedUser.full_name}`
@@ -3120,13 +3389,21 @@ export default function App({
           </div>
         </header>
 
-        <section className="chat-thread" aria-live="polite" aria-busy={loading}>
+        <section
+          className={`chat-thread ${messages.length === 0 && !loading && !error ? "chat-thread-empty" : ""}`}
+          aria-live="polite"
+          aria-busy={loading}
+        >
           {messages.length === 0 && !loading && !error && (
             <section className="welcome-panel">
               <span className="welcome-kicker">Market research workspace</span>
               <h2>How can I help with Indian markets today?</h2>
               <p>{modeCopy.welcome}</p>
-              <div className="welcome-query-grid">
+              <div
+                className="welcome-query-grid"
+                aria-label="Suggested research prompts"
+                role="group"
+              >
                 {modeExamples.slice(0, 3).map((example) => (
                   <button
                     key={example}
@@ -3138,6 +3415,9 @@ export default function App({
                   </button>
                 ))}
               </div>
+              <p className="welcome-query-hint">
+                Swipe to explore more prompts <span aria-hidden="true">→</span>
+              </p>
               <TrustStrip />
             </section>
           )}
@@ -3177,7 +3457,7 @@ export default function App({
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setAuthOpen(false);
+              closeAuthDialog();
             }
           }}
         >
@@ -3187,13 +3467,14 @@ export default function App({
             role="dialog"
             aria-labelledby="auth-modal-title"
             aria-describedby="auth-modal-copy"
+            tabIndex={-1}
             ref={authDialogRef}
           >
             <button
               className="auth-modal-close"
               type="button"
               aria-label="Close account dialog"
-              onClick={() => setAuthOpen(false)}
+              onClick={closeAuthDialog}
             >
               <span aria-hidden="true">x</span>
             </button>
@@ -3229,7 +3510,7 @@ export default function App({
           <div className="error-banner error-banner-action" role="alert">
             <span>{error}</span>
             {!displayedUser && (
-              <button type="button" onClick={() => setAuthOpen(true)}>
+              <button type="button" onClick={openAuthDialog}>
                 Open account
               </button>
             )}
@@ -3322,7 +3603,7 @@ export default function App({
               id="query"
               ref={composerInputRef}
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => setActiveQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();

@@ -14,6 +14,15 @@ def test_price_response_exposes_frontend_confidence_contract():
         market_cap="INR 1.00 Lakh Cr",
         pe_ratio=20.0,
         sector="Financial Services",
+        exchange="NSE",
+        provider="yfinance",
+        price_freshness="live_or_delayed",
+        source_url="https://finance.yahoo.com/quote/HDFCBANK.NS",
+        retrieved_at="2026-09-12T08:00:00+00:00",
+        previous_close=99.0,
+        change=1.0,
+        percent_change=1.01,
+        is_market_open=True,
         confidence_score=0.9,
         message="HDFC Bank is currently trading at INR 100.0."
     )
@@ -21,6 +30,9 @@ def test_price_response_exposes_frontend_confidence_contract():
     assert response.confidence_score == 0.9
     assert response.query_type == "PRICE_QUERY"
     assert response.disclaimer
+    assert response.provider == "yfinance"
+    assert response.source_url.endswith("HDFCBANK.NS")
+    assert response.percent_change == 1.01
 
 
 def test_agent_schemas_preserve_confidence_breakdown():

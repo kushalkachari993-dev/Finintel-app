@@ -60,6 +60,11 @@ def test_price_agent_labels_web_observed_price_as_delayed(monkeypatch):
             "currency": "INR",
             "provider": "tavily_web_search",
             "source_url": "https://www.moneycontrol.com/example",
+            "price_freshness": "web_observed",
+            "retrieved_at": "2026-09-12T08:00:00+00:00",
+            "previous_close": 725.0,
+            "change": 6.25,
+            "percent_change": 0.86,
         }
     )
 
@@ -70,6 +75,13 @@ def test_price_agent_labels_web_observed_price_as_delayed(monkeypatch):
     assert response["success"] is True
     assert response["data"]["current_price"] == 731.25
     assert response["data"]["confidence_score"] == 0.55
+    assert response["data"]["provider"] == "tavily_web_search"
+    assert response["data"]["source_url"] == "https://www.moneycontrol.com/example"
+    assert response["data"]["price_freshness"] == "web_observed"
+    assert response["data"]["retrieved_at"] == "2026-09-12T08:00:00+00:00"
+    assert response["data"]["previous_close"] == 725.0
+    assert response["data"]["change"] == 6.25
+    assert response["data"]["percent_change"] == 0.86
     assert "web-observed" in response["data"]["message"]
     assert "may be delayed" in response["data"]["message"]
 
@@ -181,5 +193,8 @@ def test_price_agent_labels_twelve_data_price(monkeypatch):
     assert response["success"] is True
     assert response["data"]["current_price"] == 708.25
     assert response["data"]["confidence_score"] == 0.9
+    assert response["data"]["provider"] == "twelve_data"
+    assert response["data"]["source_url"] == "https://twelvedata.com/"
+    assert response["data"]["is_market_open"] is False
     assert "Twelve Data" in response["data"]["message"]
     assert "latest available market update" in response["data"]["message"]

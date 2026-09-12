@@ -233,6 +233,15 @@ def test_yfinance_regular_market_price_avoids_fallbacks(monkeypatch):
                 "longName": "Regular Market Price Limited",
                 "currentPrice": None,
                 "regularMarketPrice": 501.5,
+                "regularMarketPreviousClose": 498.0,
+                "regularMarketOpen": 499.0,
+                "regularMarketDayHigh": 505.0,
+                "regularMarketDayLow": 497.5,
+                "regularMarketVolume": 125000,
+                "regularMarketChange": 3.5,
+                "regularMarketChangePercent": 0.7,
+                "marketState": "REGULAR",
+                "exchange": "NSE",
             }
 
     class UnexpectedTwelveDataTool:
@@ -253,6 +262,11 @@ def test_yfinance_regular_market_price_avoids_fallbacks(monkeypatch):
 
     assert result["current_price"] == 501.5
     assert result["provider"] == "yfinance"
+    assert result["previous_close"] == 498.0
+    assert result["day_high"] == 505.0
+    assert result["percent_change"] == 0.7
+    assert result["is_market_open"] is True
+    assert result["exchange"] == "NSE"
 
 
 def test_price_fallback_chain_skips_errors_and_invalid_prices(monkeypatch):

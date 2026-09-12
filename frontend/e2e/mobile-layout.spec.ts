@@ -36,6 +36,13 @@ test.describe("mobile layout", () => {
     expect(composerHeight).toBeLessThan(170);
   });
 
+  test("makes the horizontal prompt rail discoverable", async ({ page }) => {
+    await page.goto("/");
+
+    await expect(page.getByText(/Swipe to explore more prompts/i)).toBeVisible();
+    await expect(page.getByLabel("Suggested research prompts")).toBeVisible();
+  });
+
   test("opens and closes the research navigation drawer", async ({ page }) => {
     await page.goto("/");
 
@@ -62,6 +69,45 @@ test.describe("mobile layout", () => {
     await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
     await expect(menuButton).toHaveAttribute("aria-expanded", "false");
     await expect(menuButton).toBeFocused();
+  });
+
+  test("keeps keyboard focus inside the account dialog and restores it", async ({ page }) => {
+    await page.goto("/");
+
+    const accountButton = page.locator(".nav-auth-button");
+    await accountButton.click();
+
+    const dialog = page.getByRole("dialog", { name: /Sign in to continue|Account details/i });
+    await expect(dialog).toBeVisible();
+    await expect(page.locator(".chat-main")).toHaveAttribute("inert", "");
+
+    await dialog.evaluate((element) => {
+      const focusable = Array.from(element.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter((item) => item.getClientRects().length > 0);
+      focusable.at(-1)?.focus();
+    });
+    await page.keyboard.press("Tab");
+    await expect.poll(() => dialog.evaluate(
+      (element) => element.contains(document.activeElement)
+    )).toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(accountButton).toBeFocused();
+  });
+
+  test("keeps separate drafts for chat and report modes", async ({ page }) => {
+    await page.goto("/");
+
+    const composer = page.locator("#query");
+    await composer.fill("Current price of HDFC Bank");
+    await page.getByLabel("Work mode").getByRole("button", { name: /^Report$/ }).click();
+    await expect(composer).toHaveValue("");
+
+    await composer.fill("Generate an HDFC Bank report");
+    await page.getByLabel("Work mode").getByRole("button", { name: /^Chat$/ }).click();
+    await expect(composer).toHaveValue("Current price of HDFC Bank");
   });
 
   test("keeps compact source cards readable", async ({ page }) => {
