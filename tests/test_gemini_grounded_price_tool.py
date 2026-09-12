@@ -2,6 +2,11 @@ from backend.tools.gemini_grounded_price_tool import GeminiGroundedPriceTool
 from backend.tools.stock_data_tool import StockDataTool
 
 
+class EmptyTwelveDataTool:
+    def get_quote_data(self, ticker):
+        return None
+
+
 def grounded_payload(
     text: str,
     url: str = "https://www.tickertape.in/stocks/hdfc-bank-HDBK"
@@ -142,6 +147,11 @@ def test_stock_data_tool_uses_gemini_before_tavily_when_yfinance_fails(monkeypat
     )
     monkeypatch.setattr(
         tool,
+        "twelve_data_tool",
+        EmptyTwelveDataTool()
+    )
+    monkeypatch.setattr(
+        tool,
         "alpha_vantage_tool",
         EmptyAlphaVantageTool()
     )
@@ -213,6 +223,11 @@ def test_stock_data_tool_uses_tavily_when_gemini_is_unavailable(monkeypatch):
     monkeypatch.setattr(
         "backend.tools.stock_data_tool.yf.Ticker",
         FailingTicker
+    )
+    monkeypatch.setattr(
+        tool,
+        "twelve_data_tool",
+        EmptyTwelveDataTool()
     )
     monkeypatch.setattr(
         tool,

@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import datetime
 from datetime import timezone
 
@@ -24,6 +25,10 @@ from backend.tools.gemini_grounded_price_tool import (
     GeminiGroundedPriceTool
 )
 
+from backend.tools.twelve_data_tool import (
+    TwelveDataTool
+)
+
 from backend.tools.web_price_search_tool import (
     WebPriceSearchTool
 )
@@ -44,6 +49,119 @@ class StockDataTool:
     gemini_grounded_price_tool = GeminiGroundedPriceTool()
     web_price_search_tool = WebPriceSearchTool()
     alpha_vantage_tool = AlphaVantageTool()
+    twelve_data_tool = TwelveDataTool()
+
+    PRICE_QUOTE_FIELDS = {
+        "current_price",
+        "currency",
+        "exchange",
+        "provider",
+        "price_freshness",
+        "price_date",
+        "source_url",
+        "retrieved_at",
+        "previous_close",
+        "day_open",
+        "day_high",
+        "day_low",
+        "volume",
+        "change",
+        "percent_change",
+        "is_market_open",
+    }
+
+    @staticmethod
+    def has_valid_price(result) -> bool:
+        if not isinstance(result, dict) or result.get("error"):
+            return False
+
+        try:
+            price = float(result.get("current_price"))
+        except (TypeError, ValueError):
+            return False
+
+        return math.isfinite(price) and price > 0
+
+    @classmethod
+    def merge_price_quote(
+        cls,
+        base_result: dict,
+        quote_result: dict,
+    ) -> dict:
+        merged = dict(base_result)
+
+        for key, value in quote_result.items():
+            if value is None:
+                continue
+            if key in cls.PRICE_QUOTE_FIELDS or merged.get(key) is None:
+                merged[key] = value
+
+        merged["data_quality_score"] = max(
+            base_result.get("data_quality_score", 0.0) or 0.0,
+            quote_result.get("data_quality_score", 0.0) or 0.0,
+        )
+        return merged
+
+    def get_fallback_price(
+        self,
+        *,
+        ticker: str,
+        company_name: str | None,
+    ) -> dict | None:
+        providers = (
+            (
+                "twelve_data",
+                lambda: self.twelve_data_tool.get_quote_data(ticker=ticker),
+            ),
+            (
+                "alpha_vantage",
+                lambda: self.alpha_vantage_tool.get_quote_data(
+                    ticker=ticker,
+                    company_name=company_name,
+                ),
+            ),
+            (
+                "gemini_grounded_search",
+                lambda: self.gemini_grounded_price_tool.search_price(
+                    ticker=ticker,
+                    company_name=company_name,
+                ),
+            ),
+            (
+                "tavily_web_search",
+                lambda: self.web_price_search_tool.search_price(
+                    ticker=ticker,
+                    company_name=company_name,
+                ),
+            ),
+        )
+
+        for provider, fetch_quote in providers:
+            try:
+                quote = fetch_quote()
+            except Exception:
+                logger.exception(
+                    "stock_price_provider_failed provider=%s ticker=%s",
+                    provider,
+                    ticker,
+                )
+                continue
+
+            if self.has_valid_price(quote):
+                logger.info(
+                    "stock_price_fallback_success provider=%s ticker=%s",
+                    provider,
+                    ticker,
+                )
+                return quote
+
+            logger.warning(
+                "stock_price_provider_unavailable provider=%s ticker=%s",
+                provider,
+                ticker,
+            )
+
+        return None
 
     # ---------------------------------------------------
     # GET STOCK DATA
@@ -93,6 +211,7 @@ class StockDataTool:
 
             current_price = (
                 info.get("currentPrice")
+                or info.get("regularMarketPrice")
             )
 
             market_cap = (
@@ -311,6 +430,15 @@ class StockDataTool:
                 "current_price":
                 current_price,
 
+                "currency":
+                info.get("currency") or "INR",
+
+                "provider":
+                "yfinance",
+
+                "price_freshness":
+                "live_or_delayed",
+
                 "market_cap":
                 FinancialNormalizer
                 .normalize_market_cap(
@@ -407,115 +535,52 @@ class StockDataTool:
                 ).isoformat()
             }
 
-            if current_price is None:
-                alpha_vantage_result = (
-                    self.alpha_vantage_tool
-                    .get_quote_data(
-                        ticker=ticker,
-                        company_name=company_name
-                    )
+            if not self.has_valid_price(result):
+                fallback_result = self.get_fallback_price(
+                    ticker=ticker,
+                    company_name=company_name,
                 )
 
-                if (
-                    alpha_vantage_result
-                    and "error" not in alpha_vantage_result
-                ):
-                    price_fields = {
-                        "current_price",
-                        "currency",
-                        "exchange",
-                        "provider",
-                        "price_freshness",
-                        "price_date",
-                        "source_url",
-                    }
+                if fallback_result:
+                    result = self.merge_price_quote(
+                        result,
+                        fallback_result,
+                    )
 
-                    result.update(
-                        {
-                            key: alpha_vantage_result.get(key)
-                            for key in price_fields
-                            if alpha_vantage_result.get(key) is not None
-                        }
+            if not self.has_valid_price(result):
+                return {
+                    "error": (
+                        "All configured stock price providers are "
+                        "currently unavailable."
                     )
-                    result["data_quality_score"] = max(
-                        data_quality_score,
-                        alpha_vantage_result.get(
-                            "data_quality_score",
-                            0.0
-                        )
-                    )
+                }
 
             return self.cache.set(
                 cache_key,
                 result
             )
 
-        except Exception as e:
+        except Exception:
 
             logger.exception(
                 "stock_data_fetch_failed ticker=%s",
                 ticker
             )
 
-            alpha_vantage_result = (
-                self.alpha_vantage_tool
-                .get_quote_data(
-                    ticker=ticker,
-                    company_name=company_name
-                )
+            fallback_result = self.get_fallback_price(
+                ticker=ticker,
+                company_name=company_name,
             )
 
-            if (
-                alpha_vantage_result
-                and "error" not in alpha_vantage_result
-            ):
-
+            if fallback_result:
                 return self.cache.set(
                     cache_key,
-                    alpha_vantage_result
+                    fallback_result,
                 )
 
-            gemini_price_result = (
-                self.gemini_grounded_price_tool
-                .search_price(
-                    ticker=ticker,
-                    company_name=company_name
+            return {
+                "error": (
+                    "All configured stock price providers are "
+                    "currently unavailable."
                 )
-            )
-
-            if (
-                gemini_price_result
-                and "error" not in gemini_price_result
-            ):
-
-                return self.cache.set(
-                    cache_key,
-                    gemini_price_result
-                )
-
-            web_price_result = (
-                self.web_price_search_tool
-                .search_price(
-                    ticker=ticker,
-                    company_name=company_name
-                )
-            )
-
-            if (
-                web_price_result
-                and "error" not in web_price_result
-            ):
-
-                return self.cache.set(
-                    cache_key,
-                    web_price_result
-                )
-
-            return self.cache.set(
-                cache_key,
-                {
-
-                "error":
-                str(e)
-                }
-            )
+            }

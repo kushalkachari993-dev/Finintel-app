@@ -147,3 +147,39 @@ def test_price_agent_labels_alpha_vantage_price_as_end_of_day(monkeypatch):
     assert "Alpha Vantage" in response["data"]["message"]
     assert "2026-08-08" in response["data"]["message"]
     assert "end-of-day" in response["data"]["message"]
+
+
+def test_price_agent_labels_twelve_data_price(monkeypatch):
+    agent = PriceAgent()
+
+    monkeypatch.setattr(
+        agent.ticker_resolver,
+        "resolve",
+        lambda query: {
+            "ticker": "HDFCBANK.NS",
+            "company_name": "HDFC Bank",
+            "confidence": 0.97,
+        },
+    )
+    monkeypatch.setattr(
+        agent.stock_tool,
+        "get_stock_data",
+        lambda ticker, company_name=None: {
+            "company_name": "HDFC Bank",
+            "current_price": 708.25,
+            "market_cap": None,
+            "pe_ratio": None,
+            "sector": None,
+            "currency": "INR",
+            "provider": "twelve_data",
+            "is_market_open": False,
+        },
+    )
+
+    response = agent.get_price("Current price of HDFC Bank")
+
+    assert response["success"] is True
+    assert response["data"]["current_price"] == 708.25
+    assert response["data"]["confidence_score"] == 0.9
+    assert "Twelve Data" in response["data"]["message"]
+    assert "latest available market update" in response["data"]["message"]

@@ -2,6 +2,11 @@ from backend.tools.stock_data_tool import StockDataTool
 from backend.tools.web_price_search_tool import WebPriceSearchTool
 
 
+class EmptyTwelveDataTool:
+    def get_quote_data(self, ticker):
+        return None
+
+
 class FakeSearchTool:
 
     def __init__(
@@ -188,6 +193,11 @@ def test_stock_data_tool_uses_web_search_when_yfinance_fails(monkeypatch):
     monkeypatch.setattr(
         "backend.tools.stock_data_tool.yf.Ticker",
         FailingTicker
+    )
+    monkeypatch.setattr(
+        tool,
+        "twelve_data_tool",
+        EmptyTwelveDataTool()
     )
     monkeypatch.setattr(
         tool,

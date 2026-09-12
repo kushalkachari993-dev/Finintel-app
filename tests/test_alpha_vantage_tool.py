@@ -2,6 +2,11 @@ from backend.tools.alpha_vantage_tool import AlphaVantageTool
 from backend.tools.stock_data_tool import StockDataTool
 
 
+class EmptyTwelveDataTool:
+    def get_quote_data(self, ticker):
+        return None
+
+
 def test_alpha_vantage_maps_indian_yahoo_tickers_to_bse_symbols():
     assert AlphaVantageTool.yahoo_to_alpha_symbol("HDFCBANK.NS") == (
         "HDFCBANK.BSE",
@@ -127,6 +132,11 @@ def test_stock_data_tool_uses_alpha_vantage_before_search_fallbacks(monkeypatch)
     )
     monkeypatch.setattr(
         tool,
+        "twelve_data_tool",
+        EmptyTwelveDataTool(),
+    )
+    monkeypatch.setattr(
+        tool,
         "alpha_vantage_tool",
         FakeAlphaVantageTool(),
     )
@@ -182,6 +192,11 @@ def test_stock_data_tool_fills_missing_yfinance_price_without_losing_fundamental
     monkeypatch.setattr(
         "backend.tools.stock_data_tool.yf.Ticker",
         PartialTicker,
+    )
+    monkeypatch.setattr(
+        tool,
+        "twelve_data_tool",
+        EmptyTwelveDataTool(),
     )
     monkeypatch.setattr(
         tool,

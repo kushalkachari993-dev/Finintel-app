@@ -300,7 +300,12 @@ class PriceAgent:
 
         response_confidence = confidence
 
-        if provider == "alpha_vantage":
+        if provider == "twelve_data":
+            response_confidence = min(
+                confidence,
+                0.9
+            )
+        elif provider == "alpha_vantage":
             response_confidence = min(
                 confidence,
                 0.7
@@ -316,7 +321,22 @@ class PriceAgent:
 
         if current_price:
 
-            if provider == "alpha_vantage":
+            if provider == "twelve_data":
+                market_status = stock_data.get(
+                    "is_market_open"
+                )
+                freshness = (
+                    " while the market is open"
+                    if market_status is True
+                    else " from the latest available market update"
+                )
+                message = (
+                    f"{resolved_company_name} has a Twelve Data price of "
+                    f"INR {current_price}{freshness}. Verify with the "
+                    "exchange or broker before relying on it."
+                )
+
+            elif provider == "alpha_vantage":
                 price_date = stock_data.get(
                     "price_date"
                 )

@@ -133,3 +133,179 @@ def test_twelve_data_symbol_resolution_prefers_nse():
         "provider": "twelve_data",
     }
 
+
+def test_stock_data_tool_uses_twelve_data_when_yfinance_fails(monkeypatch):
+    tool = StockDataTool()
+
+    class FailingTicker:
+        def __init__(self, ticker):
+            raise RuntimeError("Yahoo blocked the request")
+
+    class FakeTwelveDataTool:
+        def get_quote_data(self, ticker):
+            return {
+                "company_name": "HDFC Bank Limited",
+                "current_price": 708.25,
+                "currency": "INR",
+                "exchange": "NSE",
+                "provider": "twelve_data",
+                "data_quality_score": 0.8,
+            }
+
+    class UnexpectedFallback:
+        def get_quote_data(self, *args, **kwargs):
+            raise AssertionError("later fallback should not run")
+
+        def search_price(self, *args, **kwargs):
+            raise AssertionError("later fallback should not run")
+
+    monkeypatch.setattr(
+        "backend.tools.stock_data_tool.yf.Ticker",
+        FailingTicker,
+    )
+    monkeypatch.setattr(tool, "twelve_data_tool", FakeTwelveDataTool())
+    monkeypatch.setattr(tool, "alpha_vantage_tool", UnexpectedFallback())
+    monkeypatch.setattr(
+        tool,
+        "gemini_grounded_price_tool",
+        UnexpectedFallback(),
+    )
+    monkeypatch.setattr(tool, "web_price_search_tool", UnexpectedFallback())
+
+    result = tool.get_stock_data(
+        "TWELVEFALLBACKTEST.NS",
+        company_name="HDFC Bank",
+    )
+
+    assert result["provider"] == "twelve_data"
+    assert result["current_price"] == 708.25
+
+
+def test_twelve_data_quote_fills_partial_yfinance_data(monkeypatch):
+    tool = StockDataTool()
+
+    class PartialTicker:
+        def __init__(self, ticker):
+            self.info = {
+                "longName": "HDFC Bank Limited",
+                "currentPrice": None,
+                "regularMarketPrice": None,
+                "marketCap": 10_920_000_000_000,
+                "trailingPE": 15.18,
+                "sector": "Financial Services",
+            }
+
+    class FakeTwelveDataTool:
+        def get_quote_data(self, ticker):
+            return {
+                "company_name": "HDFCBANK",
+                "current_price": 708.25,
+                "currency": "INR",
+                "exchange": "NSE",
+                "provider": "twelve_data",
+                "previous_close": 693.8,
+                "data_quality_score": 0.8,
+            }
+
+    monkeypatch.setattr(
+        "backend.tools.stock_data_tool.yf.Ticker",
+        PartialTicker,
+    )
+    monkeypatch.setattr(tool, "twelve_data_tool", FakeTwelveDataTool())
+
+    result = tool.get_stock_data("TWELVEPARTIALTEST.NS")
+
+    assert result["company_name"] == "HDFC Bank Limited"
+    assert result["current_price"] == 708.25
+    assert result["provider"] == "twelve_data"
+    assert result["previous_close"] == 693.8
+    assert result["market_cap"] == "INR 10.92 Lakh Cr"
+    assert result["pe_ratio"] == 15.18
+    assert result["sector"] == "Financial Services"
+
+
+def test_yfinance_regular_market_price_avoids_fallbacks(monkeypatch):
+    tool = StockDataTool()
+
+    class PartialTicker:
+        def __init__(self, ticker):
+            self.info = {
+                "longName": "Regular Market Price Limited",
+                "currentPrice": None,
+                "regularMarketPrice": 501.5,
+            }
+
+    class UnexpectedTwelveDataTool:
+        def get_quote_data(self, ticker):
+            raise AssertionError("fallback should not run")
+
+    monkeypatch.setattr(
+        "backend.tools.stock_data_tool.yf.Ticker",
+        PartialTicker,
+    )
+    monkeypatch.setattr(
+        tool,
+        "twelve_data_tool",
+        UnexpectedTwelveDataTool(),
+    )
+
+    result = tool.get_stock_data("REGULARMARKETPRICETEST.NS")
+
+    assert result["current_price"] == 501.5
+    assert result["provider"] == "yfinance"
+
+
+def test_price_fallback_chain_skips_errors_and_invalid_prices(monkeypatch):
+    tool = StockDataTool()
+    calls = []
+
+    class FailingTicker:
+        def __init__(self, ticker):
+            raise RuntimeError("Yahoo unavailable")
+
+    class InvalidTwelveDataTool:
+        def get_quote_data(self, ticker):
+            calls.append("twelve_data")
+            return {"current_price": None, "provider": "twelve_data"}
+
+    class FailingAlphaVantageTool:
+        def get_quote_data(self, ticker, company_name=None):
+            calls.append("alpha_vantage")
+            raise RuntimeError("Alpha unavailable")
+
+    class InvalidGeminiTool:
+        def search_price(self, ticker, company_name=None):
+            calls.append("gemini")
+            return {"current_price": 0, "provider": "gemini_grounded_search"}
+
+    class WorkingWebPriceTool:
+        def search_price(self, ticker, company_name=None):
+            calls.append("tavily")
+            return {
+                "company_name": company_name,
+                "current_price": 456.75,
+                "provider": "tavily_web_search",
+            }
+
+    monkeypatch.setattr(
+        "backend.tools.stock_data_tool.yf.Ticker",
+        FailingTicker,
+    )
+    monkeypatch.setattr(tool, "twelve_data_tool", InvalidTwelveDataTool())
+    monkeypatch.setattr(
+        tool,
+        "alpha_vantage_tool",
+        FailingAlphaVantageTool(),
+    )
+    monkeypatch.setattr(tool, "gemini_grounded_price_tool", InvalidGeminiTool())
+    monkeypatch.setattr(tool, "web_price_search_tool", WorkingWebPriceTool())
+
+    result = tool.get_stock_data(
+        "ORDEREDFALLBACKTEST.NS",
+        company_name="Fallback Limited",
+    )
+
+    assert calls == ["twelve_data", "alpha_vantage", "gemini", "tavily"]
+    assert result["current_price"] == 456.75
+    assert result["provider"] == "tavily_web_search"
+
