@@ -97,6 +97,23 @@ test.describe("mobile layout", () => {
     await expect(accountButton).toBeFocused();
   });
 
+  test("closes the account dialog with its close button", async ({ page }) => {
+    await page.goto("/");
+
+    const accountButton = page.locator(".nav-auth-button");
+    await accountButton.click();
+
+    const dialog = page.getByRole("dialog", { name: /Sign in to continue|Account details/i });
+    await expect(dialog).toBeVisible();
+
+    await page.getByRole("button", { name: "Close account dialog" }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(page.locator(".chat-main")).not.toHaveAttribute("inert", "");
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+    await expect(accountButton).toBeFocused();
+  });
+
   test("keeps separate drafts for chat and report modes", async ({ page }) => {
     await page.goto("/");
 

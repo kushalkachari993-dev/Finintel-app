@@ -3478,60 +3478,6 @@ export default function App({
             )
           )}
 
-      {authOpen && (
-        <div
-          className="auth-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeAuthDialog();
-            }
-          }}
-        >
-          <section
-            className="auth-modal"
-            aria-modal="true"
-            role="dialog"
-            aria-labelledby="auth-modal-title"
-            aria-describedby="auth-modal-copy"
-            tabIndex={-1}
-            ref={authDialogRef}
-          >
-            <button
-              className="auth-modal-close"
-              type="button"
-              aria-label="Close account dialog"
-              onClick={closeAuthDialog}
-            >
-              <span aria-hidden="true">x</span>
-            </button>
-            <div className="auth-modal-copy">
-              <span>FinIntel account</span>
-              <h2 id="auth-modal-title">
-                {displayedUser ? "Account details" : "Sign in to continue"}
-              </h2>
-              <p id="auth-modal-copy">
-                Save chat history and keep your research questions tied to your account.
-              </p>
-            </div>
-
-            <div className="auth-card auth-card-modal">
-              {externalAuth.isLoaded && externalSignedIn ? (
-                <div className="account-summary">
-                  <strong>{externalAuth.fullName}</strong>
-                  <small>{externalAuth.email}</small>
-                </div>
-              ) : (
-                <>
-                  <small>Use your Clerk account to save history.</small>
-                </>
-              )}
-              {externalAuth.controls}
-            </div>
-          </section>
-        </div>
-      )}
-
       <div ref={resultRef}>
         {error && messages.length === 0 && (
           <div className="error-banner error-banner-action" role="alert">
@@ -3669,6 +3615,60 @@ export default function App({
           </div>
         </form>
       </section>
+
+      {authOpen && (
+        <div
+          className="auth-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeAuthDialog();
+            }
+          }}
+        >
+          <section
+            className="auth-modal"
+            aria-modal="true"
+            role="dialog"
+            aria-labelledby="auth-modal-title"
+            aria-describedby="auth-modal-copy"
+            tabIndex={-1}
+            ref={authDialogRef}
+          >
+            <button
+              className="auth-modal-close"
+              type="button"
+              aria-label="Close account dialog"
+              onClick={closeAuthDialog}
+            >
+              <span aria-hidden="true">x</span>
+            </button>
+            <div className="auth-modal-copy">
+              <span>FinIntel account</span>
+              <h2 id="auth-modal-title">
+                {displayedUser ? "Account details" : "Sign in to continue"}
+              </h2>
+              <p id="auth-modal-copy">
+                Save chat history and keep your research questions tied to your account.
+              </p>
+            </div>
+
+            <div className="auth-card auth-card-modal">
+              {externalAuth.isLoaded && externalSignedIn ? (
+                <div className="account-summary">
+                  <strong>{externalAuth.fullName}</strong>
+                  <small>{externalAuth.email}</small>
+                </div>
+              ) : (
+                <>
+                  <small>Use your Clerk account to save history.</small>
+                </>
+              )}
+              {externalAuth.controls}
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
