@@ -1,11 +1,9 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
 from backend.storage import is_sqlite_url
 from backend.storage import resolve_sqlite_path
-from backend.storage import MigrationRunner
 
 load_dotenv()
 
@@ -285,19 +283,6 @@ def validate_required_settings():
     if not CLERK_ISSUER:
 
         missing.append("CLERK_ISSUER")
-
-    if AUDIT_DATABASE_PATH:
-        Path(
-            AUDIT_DATABASE_PATH
-        ).parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
-
-    MigrationRunner(
-        database_url=AUDIT_DATABASE_URL,
-        database_path=AUDIT_DATABASE_PATH
-    ).apply_pending()
 
     if missing:
 

@@ -8,7 +8,7 @@ This project deploys to Render as two services:
 
 The root `render.yaml` is a Render Blueprint. It follows Render's current
 Blueprint model: web services use `type: web`, Python uses
-`runtime: python`, static sites use `runtime: static`, and `/health` is the
+`runtime: python`, static sites use `runtime: static`, and `/ready` is the
 backend health check. Both services use `autoDeployTrigger: checksPass`,
 so Render deploys only after GitHub Actions checks pass.
 
@@ -72,7 +72,9 @@ Use the pooled PostgreSQL connection string from the Neon production branch:
 2. Select the production branch, database, and application role.
 3. Keep **Connection pooling** enabled and copy the connection string.
 4. In the Render backend service, set `DATABASE_URL` to that string.
-5. Redeploy the backend and verify `/health` before testing chat.
+5. Redeploy the backend. Its start command applies checksum-verified database
+   migrations before Uvicorn starts.
+6. Verify `/ready` before testing chat.
 
 Local development can continue using the default SQLite database. Never use
 SQLite for the deployed service because Render's service filesystem is
@@ -81,7 +83,7 @@ intentionally migrated away from Neon.
 
 ## After First Deploy
 
-1. Open the backend URL and check `/health`.
+1. Open the backend URL and check `/ready`.
 2. Copy the frontend URL.
 3. Set backend `FRONTEND_ALLOWED_ORIGINS` to the frontend URL.
 4. Copy the backend URL.
@@ -94,13 +96,13 @@ intentionally migrated away from Neon.
 Backend:
 
 ```bash
-curl https://your-backend.onrender.com/health
+curl https://your-backend.onrender.com/ready
 ```
 
 Expected result:
 
 ```json
-{"status":"ok"}
+{"status":"ok","database":"ready"}
 ```
 
 Frontend:

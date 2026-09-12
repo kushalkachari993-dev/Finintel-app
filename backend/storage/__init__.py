@@ -10,9 +10,17 @@ from backend.storage.database import is_sqlite_url
 from backend.storage.database import normalize_database_url
 from backend.storage.database import resolve_sqlite_path
 from backend.storage.migrations import MigrationRunner
+from backend.storage.migrations import MigrationChecksumError
+from backend.storage.migrations import MigrationStateError
+from backend.storage.migrations import SchemaNotCurrentError
+from backend.storage.migrations import SchemaStatus
 
 __all__ = [
     "MigrationRunner",
+    "MigrationChecksumError",
+    "MigrationStateError",
+    "SchemaNotCurrentError",
+    "SchemaStatus",
     "ConversationRepository",
     "ConversationRepositoryError",
     "ConversationRepositoryTimeout",

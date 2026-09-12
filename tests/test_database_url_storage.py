@@ -5,6 +5,7 @@ from backend.audit import ChatAuditStore
 from backend.storage import database_backend
 from backend.storage import normalize_database_url
 from backend.storage import resolve_sqlite_path
+from backend.storage import MigrationRunner
 
 
 def test_resolve_sqlite_database_url_to_path():
@@ -43,6 +44,7 @@ def test_detects_and_normalizes_postgres_database_url():
 
 def test_audit_store_uses_database_url_for_clerk_principals(tmp_path):
     database_url = f"sqlite:///{(tmp_path / 'finintel.sqlite3').as_posix()}"
+    MigrationRunner(database_url=database_url).apply_pending()
 
     audit_store = ChatAuditStore(
         database_url=database_url

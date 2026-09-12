@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from backend import main
 from backend.config import settings
 from backend.security.clerk_auth import ClerkAuthenticator
+from backend.storage import MigrationRunner
 
 
 def test_clerk_authenticator_disabled_without_jwks_url():
@@ -45,6 +46,7 @@ def test_clerk_authenticator_rejects_claims_without_subject(monkeypatch):
 
 
 def test_required_settings_fail_closed_without_clerk(monkeypatch, tmp_path):
+    database_path = tmp_path / "audit.sqlite3"
     monkeypatch.setattr(settings, "GROQ_API_KEY", "test-groq-key")
     monkeypatch.setattr(settings, "TAVILY_API_KEY", "test-tavily-key")
     monkeypatch.setattr(settings, "CLERK_JWKS_URL", "")
@@ -52,19 +54,15 @@ def test_required_settings_fail_closed_without_clerk(monkeypatch, tmp_path):
     monkeypatch.setattr(
         settings,
         "AUDIT_DATABASE_PATH",
-        str(tmp_path / "audit.sqlite3"),
+        str(database_path),
     )
-    monkeypatch.setattr(
-        settings.MigrationRunner,
-        "apply_pending",
-        lambda self: [],
-    )
-
     with pytest.raises(
         RuntimeError,
         match="CLERK_JWKS_URL, CLERK_ISSUER",
     ):
         settings.validate_required_settings()
+
+    assert database_path.exists() is False
 
 
 def test_clerk_user_from_claims_maps_role_and_profile():
@@ -134,6 +132,8 @@ def test_chat_history_uses_clerk_principal(monkeypatch, tmp_path):
                 }
             )
 
+    database_path = str(tmp_path / "audit.sqlite3")
+    MigrationRunner(database_path=database_path).apply_pending()
     monkeypatch.setattr(
         main,
         "clerk_authenticator",
@@ -143,7 +143,7 @@ def test_chat_history_uses_clerk_principal(monkeypatch, tmp_path):
         main,
         "chat_audit_store",
         main.ChatAuditStore(
-            database_path=str(tmp_path / "audit.sqlite3")
+            database_path=database_path
         )
     )
     monkeypatch.setattr(

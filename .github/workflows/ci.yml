@@ -47,7 +47,10 @@ jobs:
           AUDIT_DATABASE_PATH: /tmp/finintel-ci.sqlite3
           FRONTEND_ALLOWED_ORIGINS: http://localhost:5173
           SENTRY_DSN: ""
-        run: uv run python -m pytest
+        run: |
+          uv run python -m backend.storage.migrate
+          uv run python -m backend.storage.migrate --check
+          uv run python -m pytest
 
   frontend:
     name: Frontend

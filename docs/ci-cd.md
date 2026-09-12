@@ -14,6 +14,7 @@ Backend job:
 - Installs Python 3.11
 - Installs dependencies with `uv sync --locked`
 - Compiles the backend with `python -m compileall backend`
+- Applies and validates migrations against the CI SQLite database
 - Runs the backend test suite with test-only environment values
 
 Frontend job:
@@ -82,7 +83,7 @@ This runs every 15 minutes and can also be started manually from GitHub
 Actions. It checks:
 
 - Frontend page loads successfully
-- Backend `/health` returns `{"status":"ok"}`
+- Backend `/ready` returns an OK status and confirms the database schema is ready
 
 Defaults:
 

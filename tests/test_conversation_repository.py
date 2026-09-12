@@ -5,13 +5,33 @@ from backend import main
 from backend.audit import ChatAuditStore
 from backend.storage import PostgresConversationRepository
 from backend.storage import ConversationRepositoryError
+from backend.storage import MigrationRunner
 from backend.storage import ThreadedConversationRepository
 from backend.storage import build_conversation_repository
+from backend.storage.migrations import list_migrations
+
+
+@pytest.mark.anyio
+async def test_threaded_repository_is_not_ready_until_migrations_run(tmp_path):
+    database_path = str(tmp_path / "unmigrated.sqlite3")
+    store = ChatAuditStore(database_path=database_path)
+    repository = ThreadedConversationRepository(
+        lambda: store,
+        operation_timeout_seconds=5,
+    )
+
+    assert await repository.ready() is False
+
+    MigrationRunner(database_path=database_path).apply_pending()
+
+    assert await repository.ready() is True
 
 
 @pytest.mark.anyio
 async def test_threaded_repository_persists_research_result_atomically(tmp_path):
-    store = ChatAuditStore(database_path=str(tmp_path / "repository.sqlite3"))
+    database_path = str(tmp_path / "repository.sqlite3")
+    MigrationRunner(database_path=database_path).apply_pending()
+    store = ChatAuditStore(database_path=database_path)
     repository = ThreadedConversationRepository(
         lambda: store,
         operation_timeout_seconds=5,
@@ -91,7 +111,9 @@ def test_sqlite_atomic_persistence_rolls_back_both_records(
     monkeypatch,
     tmp_path,
 ):
-    store = ChatAuditStore(database_path=str(tmp_path / "rollback.sqlite3"))
+    database_path = str(tmp_path / "rollback.sqlite3")
+    MigrationRunner(database_path=database_path).apply_pending()
+    store = ChatAuditStore(database_path=database_path)
     conversation_id = store.create_conversation(
         principal_id="clerk:user_1",
         title="Rollback",
@@ -145,13 +167,28 @@ def test_repository_factory_uses_postgres_pool_for_neon_url():
 @pytest.mark.anyio
 async def test_postgres_pool_start_retries_and_closes(monkeypatch):
     class FakeCursor:
+        def __init__(self, rows):
+            self.rows = rows
+
         async def fetchone(self):
-            return (1,)
+            return self.rows[0] if self.rows else None
+
+        async def fetchall(self):
+            return self.rows
 
     class FakeConnection:
         async def execute(self, statement):
-            assert statement == "SELECT 1"
-            return FakeCursor()
+            if statement == "SELECT 1":
+                return FakeCursor([(1,)])
+            assert statement == (
+                "SELECT version, checksum FROM schema_migrations"
+            )
+            return FakeCursor(
+                [
+                    (migration.version, migration.checksum)
+                    for migration in list_migrations()
+                ]
+            )
 
     class ConnectionContext:
         async def __aenter__(self):

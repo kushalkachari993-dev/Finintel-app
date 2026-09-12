@@ -32,6 +32,7 @@ from backend.security import APIKeyAuthenticator
 from backend.security import ClerkAuthenticator
 from backend.services import ResearchService
 from backend.storage import build_conversation_repository
+from backend.storage.migrate import validate_configured_schema
 from backend.utils.logging_config import configure_logging
 from backend.observability.sentry import init_sentry
 
@@ -181,6 +182,7 @@ def build_research_service() -> ResearchService:
 async def lifespan(app: FastAPI):
     _ = app
     await asyncio.to_thread(settings.validate_required_settings)
+    await asyncio.to_thread(validate_configured_schema)
     await conversation_repository.start()
     try:
         yield

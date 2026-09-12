@@ -30,12 +30,13 @@ jobs:
             "$FRONTEND_URL" > /tmp/frontend.html
           grep -qi "<html" /tmp/frontend.html
 
-      - name: Check backend health
+      - name: Check backend readiness
         run: |
-          echo "Checking backend: $BACKEND_URL/health"
+          echo "Checking backend: $BACKEND_URL/ready"
           curl --fail --show-error --silent --location \
             --max-time 30 \
             --retry 2 \
             --retry-delay 10 \
-            "$BACKEND_URL/health" > /tmp/backend-health.json
-          grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/backend-health.json
+            "$BACKEND_URL/ready" > /tmp/backend-ready.json
+          grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/backend-ready.json
+          grep -q '"database"[[:space:]]*:[[:space:]]*"ready"' /tmp/backend-ready.json

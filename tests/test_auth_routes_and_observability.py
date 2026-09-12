@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from backend import main
 from backend.audit import ChatAuditStore
 from backend.security.clerk_auth import ClerkAuthenticator
+from backend.storage import MigrationRunner
 
 
 class FakeClerkAuthenticator:
@@ -20,6 +21,8 @@ class FakeClerkAuthenticator:
 
 
 def configure_clerk_routes(monkeypatch, tmp_path):
+    database_path = str(tmp_path / "audit.sqlite3")
+    MigrationRunner(database_path=database_path).apply_pending()
     monkeypatch.setattr(
         main,
         "clerk_authenticator",
@@ -29,7 +32,7 @@ def configure_clerk_routes(monkeypatch, tmp_path):
         main,
         "chat_audit_store",
         ChatAuditStore(
-            database_path=str(tmp_path / "audit.sqlite3")
+            database_path=database_path
         ),
     )
     monkeypatch.setattr(

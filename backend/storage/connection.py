@@ -73,6 +73,15 @@ class PostgresConnection:
             traceback
         )
 
+    def commit(self):
+        return self.connection.commit()
+
+    def rollback(self):
+        return self.connection.rollback()
+
+    def close(self):
+        return self.connection.close()
+
     def execute(
         self,
         statement: str,
@@ -208,10 +217,16 @@ def translate_sqlite_sql_to_postgres(
 def connect_database(
     *,
     database_url: str | None = None,
-    database_path: str | None = None
+    database_path: str | None = None,
+    read_only: bool = False,
 ):
 
     if database_path:
+        if read_only:
+            return sqlite3.connect(
+                f"{Path(database_path).resolve().as_uri()}?mode=ro",
+                uri=True,
+            )
         Path(database_path).parent.mkdir(
             parents=True,
             exist_ok=True
@@ -233,6 +248,11 @@ def connect_database(
         database_path = resolve_sqlite_path(
             database_url
         )
+        if read_only:
+            return sqlite3.connect(
+                f"{Path(database_path).resolve().as_uri()}?mode=ro",
+                uri=True,
+            )
         Path(database_path).parent.mkdir(
             parents=True,
             exist_ok=True

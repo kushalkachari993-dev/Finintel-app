@@ -11,6 +11,9 @@ from uuid import uuid4
 from backend.observability import observability
 from backend.storage.database import database_backend
 from backend.storage.database import normalize_database_url
+from backend.storage.migrations import list_migrations
+from backend.storage.migrations import MigrationRunner
+from backend.storage.migrations import schema_status_from_rows
 
 
 logger = logging.getLogger(__name__)
@@ -175,8 +178,19 @@ class ThreadedConversationRepository:
 
     async def ready(self) -> bool:
         def ping() -> bool:
-            with self.store_provider().connect() as connection:
-                return bool(connection.execute("SELECT 1").fetchone())
+            store = self.store_provider()
+            runner = MigrationRunner(
+                database_url=store.database_url,
+                database_path=store.database_path,
+            )
+            connection = runner.connect(read_only=True)
+            try:
+                connected = bool(connection.execute("SELECT 1").fetchone())
+                return connected and runner.schema_status(
+                    connection=connection
+                ).current
+            finally:
+                connection.close()
 
         started_at = time.perf_counter()
         result = "success"
@@ -389,7 +403,16 @@ class PostgresConversationRepository:
     async def ready(self) -> bool:
         async def ping(connection):
             cursor = await connection.execute("SELECT 1")
-            return bool(await cursor.fetchone())
+            if not await cursor.fetchone():
+                return False
+            cursor = await connection.execute(
+                "SELECT version, checksum FROM schema_migrations"
+            )
+            rows = await cursor.fetchall()
+            return schema_status_from_rows(
+                rows,
+                list_migrations(),
+            ).current
 
         try:
             return await self._run("ready", ping)

@@ -23,6 +23,8 @@ logs/
 .cache*/
 .video-tools/
 .pytest_cache/
+.pytest-*/
+tests/.runtime/
 .mypy_cache/
 .ruff_cache/
 

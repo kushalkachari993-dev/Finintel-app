@@ -1,10 +1,14 @@
 from backend.audit import ChatAuditStore
+from backend.storage import MigrationRunner
+
+
+def migrated_store(database_path):
+    MigrationRunner(database_path=database_path).apply_pending()
+    return ChatAuditStore(database_path=database_path)
 
 
 def test_chat_audit_store_records_and_lists_history(tmp_path):
-    store = ChatAuditStore(
-        database_path=str(tmp_path / "audit.sqlite3")
-    )
+    store = migrated_store(str(tmp_path / "audit.sqlite3"))
 
     audit_id = store.record_chat(
         request_id="req-1",
@@ -48,9 +52,7 @@ def test_chat_audit_store_records_and_lists_history(tmp_path):
 
 
 def test_chat_audit_store_records_conversation_messages(tmp_path):
-    store = ChatAuditStore(
-        database_path=str(tmp_path / "audit.sqlite3")
-    )
+    store = migrated_store(str(tmp_path / "audit.sqlite3"))
 
     conversation_id = store.create_conversation(
         principal_id="user:1",
@@ -90,9 +92,7 @@ def test_chat_audit_store_records_conversation_messages(tmp_path):
 
 
 def test_conversations_support_search_pin_rename_pagination_and_delete(tmp_path):
-    store = ChatAuditStore(
-        database_path=str(tmp_path / "audit.sqlite3")
-    )
+    store = migrated_store(str(tmp_path / "audit.sqlite3"))
     roe_id = store.create_conversation(
         principal_id="user:1",
         title="ROE research"

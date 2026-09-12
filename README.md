@@ -114,6 +114,13 @@ Run tests:
 uv run pytest
 ```
 
+Apply and validate database migrations before starting the backend:
+
+```bash
+python -m backend.storage.migrate
+python -m backend.storage.migrate --check
+```
+
 Run a syntax/import compile check:
 
 ```powershell
@@ -216,7 +223,7 @@ Built-in observability endpoints:
 - `GET /metrics` returns Prometheus-style metrics
 - `GET /observability` returns a JSON snapshot
 - `GET /observability/dashboard` returns a simple HTML dashboard
-- `GET /ready` verifies the database with `SELECT 1`
+- `GET /ready` verifies database connectivity and migration checksums
 
 The dashboard includes request counts, error counts, timeout counts,
 average latency, alert messages, and recent traces.
@@ -233,6 +240,12 @@ latency, and timestamp.
 PostgreSQL deployments use an asynchronous connection pool initialized
 and closed with the FastAPI lifespan. SQLite remains available for local
 development and tests through a non-blocking thread adapter.
+
+Schema changes run through `python -m backend.storage.migrate` before the
+application starts. Each migration is transactional and checksum-verified;
+PostgreSQL deployments also serialize migration runs with an advisory lock.
+Application startup and `/ready` are read-only schema checks and fail closed
+when migrations are missing, unexpected, or modified.
 
 Users can retrieve their own recent chat history with:
 

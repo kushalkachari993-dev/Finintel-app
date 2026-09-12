@@ -23,67 +23,11 @@ class ChatAuditStore:
             self.database_path = settings.AUDIT_DATABASE_PATH
             self.database_url = settings.AUDIT_DATABASE_URL
 
-        self.init_db()
-
     def connect(self):
         return connect_database(
             database_url=self.database_url,
             database_path=self.database_path
         )
-
-    def init_db(self):
-        with self.connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS chat_audit (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    request_id TEXT NOT NULL,
-                    principal_id TEXT,
-                    user_id INTEGER,
-                    api_client_id TEXT,
-                    query TEXT NOT NULL,
-                    route TEXT,
-                    routing_json TEXT,
-                    intelligence_json TEXT,
-                    response_success INTEGER NOT NULL,
-                    response_error TEXT,
-                    confidence_score REAL,
-                    latency_ms REAL,
-                    created_at INTEGER NOT NULL
-                )
-                """
-            )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_chat_audit_principal_created
-                ON chat_audit (principal_id, created_at DESC)
-                """
-            )
-
-    @staticmethod
-    def ensure_payload_columns(
-        connection
-    ):
-        columns = {
-            row[1]
-            for row in connection.execute(
-                "PRAGMA table_info(chat_audit)"
-            ).fetchall()
-        }
-        column_definitions = {
-            "response_json": "TEXT",
-            "answer_detail": "TEXT",
-            "model": "TEXT",
-            "conversation_id": "TEXT"
-        }
-
-        for column, column_type in column_definitions.items():
-            if column in columns:
-                continue
-
-            connection.execute(
-                f"ALTER TABLE chat_audit ADD COLUMN {column} {column_type}"
-            )
 
     @staticmethod
     def to_json(
@@ -134,65 +78,6 @@ class ChatAuditStore:
             "created_at": row[6]
         }
 
-    @staticmethod
-    def ensure_conversation_tables(
-        connection
-    ):
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS chat_conversations (
-                id TEXT PRIMARY KEY,
-                principal_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_chat_conversations_principal_updated
-            ON chat_conversations (principal_id, updated_at DESC)
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                principal_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                payload_json TEXT,
-                created_at INTEGER NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_created
-            ON chat_messages (conversation_id, created_at ASC, id ASC)
-            """
-        )
-        columns = {
-            row[1]
-            for row in connection.execute(
-                "PRAGMA table_info(chat_conversations)"
-            ).fetchall()
-        }
-        if "pinned" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE chat_conversations
-                ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0
-                """
-            )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_chat_conversations_principal_pinned_updated
-            ON chat_conversations (principal_id, pinned DESC, updated_at DESC)
-            """
-        )
 
     def record_chat(
         self,
@@ -212,9 +97,6 @@ class ChatAuditStore:
         latency_ms: float | None = None
     ) -> int:
         with self.connect() as connection:
-            self.ensure_payload_columns(
-                connection
-            )
             return self._insert_chat_audit(
                 connection,
                 request_id=request_id,
@@ -310,9 +192,6 @@ class ChatAuditStore:
         )
 
         with self.connect() as connection:
-            self.ensure_payload_columns(
-                connection
-            )
             rows = connection.execute(
                 """
                 SELECT
@@ -368,9 +247,6 @@ class ChatAuditStore:
         )
 
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             connection.execute(
                 """
                 INSERT INTO chat_conversations (
@@ -400,9 +276,6 @@ class ChatAuditStore:
         conversation_id: str
     ) -> bool:
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             row = connection.execute(
                 """
                 SELECT 1
@@ -426,9 +299,6 @@ class ChatAuditStore:
         conversation_id: str
     ):
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             connection.execute(
                 """
                 UPDATE chat_conversations
@@ -454,9 +324,6 @@ class ChatAuditStore:
             return False
 
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             existing = connection.execute(
                 """
                 SELECT 1
@@ -495,9 +362,6 @@ class ChatAuditStore:
         pinned: bool
     ) -> bool:
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             existing = connection.execute(
                 """
                 SELECT 1
@@ -534,9 +398,6 @@ class ChatAuditStore:
         conversation_id: str
     ) -> bool:
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             existing = connection.execute(
                 """
                 SELECT 1
@@ -584,9 +445,6 @@ class ChatAuditStore:
         payload: dict | None = None
     ) -> int:
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             return self._insert_message(
                 connection,
                 conversation_id=conversation_id,
@@ -663,8 +521,6 @@ class ChatAuditStore:
     ) -> tuple[int, int]:
         """Persist the assistant message and audit row in one transaction."""
         with self.connect() as connection:
-            self.ensure_conversation_tables(connection)
-            self.ensure_payload_columns(connection)
             message_id = self._insert_message(
                 connection,
                 conversation_id=conversation_id,
@@ -712,9 +568,6 @@ class ChatAuditStore:
         clean_search = search.strip().lower()[:120]
 
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             if clean_search:
                 rows = connection.execute(
                     """
@@ -775,9 +628,6 @@ class ChatAuditStore:
         conversation_id: str
     ) -> list[dict]:
         with self.connect() as connection:
-            self.ensure_conversation_tables(
-                connection
-            )
             rows = connection.execute(
                 """
                 SELECT
