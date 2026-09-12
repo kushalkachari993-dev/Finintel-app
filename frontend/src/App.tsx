@@ -27,6 +27,19 @@ const REPORT_EXAMPLES = [
   "Prepare a news impact report for Infosys",
 ];
 
+const PROMPT_PRESENTATION: Record<WorkMode, Array<{ icon: string; label: string; detail: string }>> = {
+  chat: [
+    { icon: "%", label: "Learn", detail: "Understand a financial metric" },
+    { icon: "₹", label: "Quote", detail: "Check price and market context" },
+    { icon: "↔", label: "Compare", detail: "Evaluate companies side by side" },
+  ],
+  report: [
+    { icon: "▤", label: "Company", detail: "Build a structured company brief" },
+    { icon: "↔", label: "Compare", detail: "Create an investment comparison" },
+    { icon: "⌁", label: "Screen", detail: "Research a sector or market theme" },
+  ],
+};
+
 const ROUTE_LABELS: Record<string, string> = {
   PRICE_QUERY: "Price Check",
   EDUCATIONAL: "Learning",
@@ -3114,7 +3127,8 @@ export default function App({
             setMobileNavOpen(false);
           }}
         >
-          + New research chat
+          <span aria-hidden="true">+</span>
+          New research chat
         </button>
 
         <section className="sidebar-section">
@@ -3404,16 +3418,29 @@ export default function App({
                 aria-label="Suggested research prompts"
                 role="group"
               >
-                {modeExamples.slice(0, 3).map((example) => (
+                {modeExamples.slice(0, 3).map((example, index) => {
+                  const presentation = PROMPT_PRESENTATION[workMode][index];
+                  return (
                   <button
                     key={example}
                     type="button"
                     onClick={() => selectExample(example)}
+                    aria-label={`Use prompt: ${example}`}
                   >
-                    <span>{workMode === "report" ? "Report" : "Prompt"}</span>
+                    <span className="prompt-card-heading">
+                      <span className="prompt-card-icon" aria-hidden="true">
+                        {presentation.icon}
+                      </span>
+                      <span className="prompt-card-label">{presentation.label}</span>
+                    </span>
                     <strong>{example}</strong>
+                    <small>{presentation.detail}</small>
+                    <span className="prompt-card-action" aria-hidden="true">
+                      Explore <span>→</span>
+                    </span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
               <p className="welcome-query-hint">
                 Swipe to explore more prompts <span aria-hidden="true">→</span>
@@ -3555,9 +3582,16 @@ export default function App({
         </section>
 
         <form className="chat-composer" onSubmit={submit}>
-          <div className="composer-toolbar">
-            <span id="composer-status">{authStatus}</span>
-            <div className="composer-actions">
+          <div className="composer-shell">
+            <div className="composer-toolbar">
+              <span id="composer-status">
+                <span
+                  className={`composer-status-dot ${externalSignedIn ? "composer-status-dot-online" : ""}`}
+                  aria-hidden="true"
+                />
+                {authStatus}
+              </span>
+              <div className="composer-actions">
               <div className="mode-switch mode-switch-inline" aria-label="Work mode">
                 <button
                   className={workMode === "chat" ? "active" : ""}
@@ -3596,27 +3630,42 @@ export default function App({
                 </button>
               </div>
             </div>
-          </div>
-          <label className="sr-only" htmlFor="query">Ask FinIntel</label>
-          <div className="composer-input-row">
-            <textarea
-              id="query"
-              ref={composerInputRef}
-              value={query}
-              onChange={(event) => setActiveQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder={modeCopy.placeholder}
-              aria-describedby="composer-status"
-              rows={2}
-            />
-            <button disabled={loading || !query.trim()} type="submit">
-              {loading ? "Analyzing..." : modeCopy.submit}
-            </button>
+            </div>
+            <label className="sr-only" htmlFor="query">Ask FinIntel</label>
+            <div className="composer-input-row">
+              <textarea
+                id="query"
+                ref={composerInputRef}
+                value={query}
+                onChange={(event) => setActiveQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder={modeCopy.placeholder}
+                aria-describedby="composer-status composer-guidance"
+                rows={2}
+              />
+              <button
+                aria-label={loading ? "Analyzing..." : modeCopy.submit}
+                disabled={loading || !query.trim()}
+                type="submit"
+              >
+                <span className="submit-label-full">
+                  {loading ? "Analyzing..." : modeCopy.submit}
+                </span>
+                <span className="submit-label-mobile" aria-hidden="true">
+                  {loading ? "Wait" : workMode === "report" ? "Create" : "Run"}
+                </span>
+                <span className="submit-arrow" aria-hidden="true">↗</span>
+              </button>
+            </div>
+            <div className="composer-guidance" id="composer-guidance">
+              <span>Enter to submit · Shift + Enter for a new line</span>
+              <span>Verify market data before acting</span>
+            </div>
           </div>
         </form>
       </section>
