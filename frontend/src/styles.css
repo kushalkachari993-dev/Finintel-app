@@ -2873,6 +2873,34 @@ h1 {
   content-visibility: visible;
 }
 
+.pdf-exporting {
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.pdf-exporting .result-section-nav,
+.pdf-exporting .investment-snapshot-actions > button,
+.pdf-exporting .report-disclosure > summary {
+  display: none !important;
+}
+
+.pdf-exporting .report-disclosure {
+  border: 0;
+  box-shadow: none;
+}
+
+.pdf-exporting .report-disclosure-content {
+  border-top: 0;
+  padding: 0;
+}
+
+.pdf-report-exporting > .result-section-anchor:first-child,
+.pdf-report-exporting > .answer-overview,
+.pdf-report-exporting > .result-section-anchor,
+.pdf-report-exporting > .guardrail-notice {
+  display: none !important;
+}
+
 .report-disclosure-content > :first-child {
   margin-top: 0;
 }

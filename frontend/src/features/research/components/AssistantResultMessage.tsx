@@ -768,7 +768,8 @@ function safeFileName(value: string) {
 
 async function exportElementToPdf(
   element: HTMLElement,
-  title: string
+  title: string,
+  reportOnly = false
 ) {
   const [
     { default: html2canvas },
@@ -782,34 +783,57 @@ async function exportElementToPdf(
   const disclosureStates = disclosures.map((details) => details.open);
 
   element.classList.add("pdf-exporting");
+  element.classList.toggle("pdf-report-exporting", reportOnly);
   disclosures.forEach((details) => {
     details.open = true;
   });
 
-  await new Promise<void>((resolve) => {
+  await document.fonts?.ready;
+  await new Promise<void>((resolve) => requestAnimationFrame(() => {
     requestAnimationFrame(() => resolve());
-  });
+  }));
 
   let canvas: HTMLCanvasElement;
+  let breakPoints: number[] = [];
 
   try {
+    const elementRect = element.getBoundingClientRect();
+    const breakNodes = Array.from(element.querySelectorAll<HTMLElement>([
+      ".report-cover",
+      ".report-page > *",
+      ".report-disclosure-content > *",
+      ".report-company-card > *",
+      ".report-three-grid > *",
+      ".report-two-grid > *",
+      ".source-section",
+      ".disclaimer",
+    ].join(",")));
+    const breakRects = breakNodes
+      .map((node) => node.getBoundingClientRect())
+      .filter((rect) => rect.height > 0);
+    const breakPointsCss = breakRects.flatMap((rect) => [
+      rect.top - elementRect.top,
+      rect.bottom - elementRect.top,
+    ]).filter((point) => point > 0 && point <= elementRect.height + 1);
+
     canvas = await html2canvas(
       element,
       {
-        backgroundColor: "#f6f8f7",
-        scale: 2,
+        backgroundColor: "#ffffff",
+        scale: 1.5,
         useCORS: true
       }
     );
+
+    const scaleY = canvas.height / Math.max(elementRect.height, 1);
+    breakPoints = breakPointsCss.map((bottom) => Math.round(bottom * scaleY));
   } finally {
     disclosures.forEach((details, index) => {
       details.open = disclosureStates[index];
     });
     element.classList.remove("pdf-exporting");
+    element.classList.remove("pdf-report-exporting");
   }
-  const image = canvas.toDataURL(
-    "image/png"
-  );
   const pdf = new jsPDF(
     "p",
     "mm",
@@ -817,38 +841,81 @@ async function exportElementToPdf(
   );
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 10;
+  const margin = 11;
+  const footerHeight = 7;
   const imageWidth = pageWidth - margin * 2;
-  const imageHeight = (
-    canvas.height
-    * imageWidth
-  ) / canvas.width;
-  let remainingHeight = imageHeight;
-  let position = margin;
-
-  pdf.addImage(
-    image,
-    "PNG",
-    margin,
-    position,
-    imageWidth,
-    imageHeight
+  const contentHeight = pageHeight - margin * 2 - footerHeight;
+  const maxSliceHeight = Math.floor(
+    canvas.width * contentHeight / imageWidth
   );
-  remainingHeight -= pageHeight - margin * 2;
+  const slices: Array<{ start: number; end: number }> = [];
+  let sliceStart = 0;
 
-  while (remainingHeight > 0) {
-    position = remainingHeight - imageHeight + margin;
-    pdf.addPage();
-    pdf.addImage(
-      image,
-      "PNG",
-      margin,
-      position,
-      imageWidth,
-      imageHeight
+  while (sliceStart < canvas.height) {
+    const maximumEnd = Math.min(sliceStart + maxSliceHeight, canvas.height);
+    const minimumEnd = sliceStart + maxSliceHeight * 0.28;
+    const safeEnds = breakPoints.filter(
+      (point) => point >= minimumEnd && point <= maximumEnd
     );
-    remainingHeight -= pageHeight - margin * 2;
+    let sliceEnd = safeEnds.length
+      ? Math.max(...safeEnds)
+      : maximumEnd;
+
+    if (canvas.height - sliceEnd < maxSliceHeight * 0.08) {
+      sliceEnd = canvas.height;
+    }
+
+    slices.push({ start: sliceStart, end: sliceEnd });
+    sliceStart = sliceEnd;
   }
+
+  slices.forEach(({ start, end }, index) => {
+    if (index > 0) pdf.addPage();
+
+    const sliceCanvas = document.createElement("canvas");
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = end - start;
+    const context = sliceCanvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Unable to prepare the PDF page.");
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+    context.drawImage(
+      canvas,
+      0,
+      start,
+      canvas.width,
+      sliceCanvas.height,
+      0,
+      0,
+      canvas.width,
+      sliceCanvas.height
+    );
+
+    const imageHeight = sliceCanvas.height * imageWidth / sliceCanvas.width;
+    pdf.addImage(
+      sliceCanvas.toDataURL("image/jpeg", 0.84),
+      "JPEG",
+      margin,
+      margin,
+      imageWidth,
+      imageHeight,
+      undefined,
+      "FAST"
+    );
+
+    pdf.setFontSize(8);
+    pdf.setTextColor(98, 116, 110);
+    pdf.text(
+      `FinIntel AI  |  ${index + 1} / ${slices.length}`,
+      pageWidth - margin,
+      pageHeight - 6,
+      { align: "right" }
+    );
+  });
 
   pdf.save(
     `${safeFileName(title)}.pdf`
@@ -1847,7 +1914,8 @@ function AssistantResultMessage({
     try {
       await exportElementToPdf(
         exportRef.current,
-        reportTitle
+        reportTitle,
+        isReport
       );
     } finally {
       setExporting(false);

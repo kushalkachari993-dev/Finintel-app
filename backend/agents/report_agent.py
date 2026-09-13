@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 class ReportAgent:
 
+    RESEARCH_METRIC_FIELDS = (
+        "current_price",
+        "market_cap",
+        "pe_ratio",
+        "pb_ratio",
+        "roe",
+        "profit_margin",
+        "revenue_growth",
+        "debt_to_equity",
+    )
+
     def __init__(self):
 
         self.groq = GroqProvider()
@@ -156,7 +167,10 @@ class ReportAgent:
             "ticker"
         )
         stock_data = self.stock_tool.get_stock_data(
-            ticker
+            ticker,
+            company_name=company.get(
+                "company_name"
+            )
         )
 
         if (
@@ -166,6 +180,19 @@ class ReportAgent:
             return {
                 "success": False,
                 "company": company,
+                "error": "market_data_unavailable",
+                "sources": []
+            }
+
+        populated_metrics = self.count_research_metrics(
+            stock_data
+        )
+
+        if populated_metrics < 3:
+            return {
+                "success": False,
+                "company": company,
+                "error": "insufficient_financial_metrics",
                 "sources": []
             }
 
@@ -193,7 +220,8 @@ class ReportAgent:
             "sources": context.get(
                 "sources_used",
                 []
-            )
+            ),
+            "populated_metrics": populated_metrics,
         }
 
     def fetch_report_inputs(
@@ -233,6 +261,17 @@ class ReportAgent:
             "debt_to_equity": stock_data.get("debt_to_equity"),
             "data_quality_score": stock_data.get("data_quality_score")
         }
+
+    @classmethod
+    def count_research_metrics(
+        cls,
+        stock_data: dict
+    ) -> int:
+
+        return sum(
+            stock_data.get(field) not in (None, "")
+            for field in cls.RESEARCH_METRIC_FIELDS
+        )
 
     def build_fallback_report(
         self,
@@ -426,6 +465,41 @@ class ReportAgent:
             )
         ]
 
+        failed_inputs = [
+            item
+            for item in report_inputs
+            if not item.get(
+                "success"
+            )
+        ]
+
+        if len(resolved_companies) > 1 and failed_inputs:
+            unavailable_companies = [
+                item.get(
+                    "company",
+                    {}
+                ).get(
+                    "company_name"
+                )
+                or item.get(
+                    "company",
+                    {}
+                ).get(
+                    "ticker"
+                )
+                or "one requested company"
+                for item in failed_inputs
+            ]
+            return {
+                "success": False,
+                "data": None,
+                "error": (
+                    "A reliable comparison requires sufficient live financial "
+                    "metrics for every requested company. Data was unavailable "
+                    f"for: {', '.join(unavailable_companies)}. Please retry later."
+                )
+            }
+
         if not successful_inputs:
             return {
                 "success": False,
@@ -455,8 +529,22 @@ class ReportAgent:
                 len(candidates),
                 1
             ),
-            data_fields_present=8,
-            expected_data_fields=10,
+            data_fields_present=sum(
+                item.get(
+                    "populated_metrics",
+                    self.count_research_metrics(
+                        item.get(
+                            "stock_data",
+                            {}
+                        )
+                    )
+                )
+                for item in successful_inputs
+            ),
+            expected_data_fields=(
+                len(successful_inputs)
+                * len(self.RESEARCH_METRIC_FIELDS)
+            ),
             llm_parse_success=True,
             schema_validation_success=True,
             trusted_sources_count=len(sources_used),

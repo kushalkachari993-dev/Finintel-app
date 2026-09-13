@@ -16,7 +16,7 @@ def resolved_bank_companies():
     ]
 
 
-def test_comparison_returns_partial_response_when_live_data_is_unavailable(monkeypatch):
+def test_comparison_rejects_response_when_live_data_is_unavailable(monkeypatch):
     agent = ComparisonAgent()
 
     monkeypatch.setattr(
@@ -38,20 +38,13 @@ def test_comparison_returns_partial_response_when_live_data_is_unavailable(monke
         "Compare HDFC Bank vs ICICI Bank"
     )
 
-    assert response["success"] is True
-    assert response["error"] is None
-    assert response["data"]["comparison_type"] == "Peer Comparison"
-    assert response["data"]["companies_compared"] == [
-        "HDFC Bank",
-        "ICICI Bank"
-    ]
-    assert response["data"]["confidence_score"] == 0.3
-    assert response["data"]["confidence_breakdown"]["fallback_used"] is True
-    assert "Insufficient valid company data" not in response["data"]["summary"]
-    assert "live data was insufficient" in response["data"]["balanced_view"]
+    assert response["success"] is False
+    assert response["data"] is None
+    assert "reliable comparison" in response["error"]
+    assert "Please retry later" in response["error"]
 
 
-def test_comparison_returns_partial_response_with_one_successful_company(monkeypatch):
+def test_comparison_rejects_response_with_one_successful_company(monkeypatch):
     agent = ComparisonAgent()
 
     monkeypatch.setattr(
@@ -84,16 +77,21 @@ def test_comparison_returns_partial_response_with_one_successful_company(monkeyp
         "Compare HDFC Bank vs ICICI Bank"
     )
 
-    assert response["success"] is True
-    assert response["data"]["comparison_type"] == "Peer Comparison"
-    assert response["data"]["confidence_score"] == 0.45
-    assert response["data"]["confidence_breakdown"]["retrieval_score"] == 0.5
-    assert any(
-        "Current price: 1500" in item
-        for item in response["data"]["comparative_analysis"]
-    )
-    assert any(
-        "ICICI Bank" in item
-        and "unavailable" in item
-        for item in response["data"]["comparative_analysis"]
-    )
+    assert response["success"] is False
+    assert response["data"] is None
+    assert "at least two companies" in response["error"]
+
+
+def test_price_only_data_is_not_enough_for_peer_comparison():
+    assert ComparisonAgent.has_comparison_coverage({
+        "current_price": 1500,
+        "provider": "twelve_data"
+    }) is False
+
+
+def test_two_financial_metrics_are_enough_for_peer_comparison():
+    assert ComparisonAgent.has_comparison_coverage({
+        "current_price": 1500,
+        "pe_ratio": 20,
+        "roe": "15%"
+    }) is True

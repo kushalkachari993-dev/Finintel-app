@@ -51,6 +51,28 @@ logger = logging.getLogger(__name__)
 
 class ComparisonAgent:
 
+    COMPARISON_METRIC_FIELDS = (
+        "market_cap",
+        "pe_ratio",
+        "pb_ratio",
+        "roe",
+        "profit_margin",
+        "revenue_growth",
+        "debt_to_equity",
+    )
+
+    @classmethod
+    def has_comparison_coverage(
+        cls,
+        stock_data: dict
+    ) -> bool:
+
+        populated_metrics = sum(
+            stock_data.get(field) not in (None, "")
+            for field in cls.COMPARISON_METRIC_FIELDS
+        )
+        return populated_metrics >= 2
+
     # ---------------------------------------------------
     # INIT
     # ---------------------------------------------------
@@ -291,13 +313,19 @@ class ComparisonAgent:
 
                 self.stock_tool
                 .get_stock_data(
-                    ticker
+                    ticker,
+                    company_name=company.get(
+                        "company_name"
+                    )
                 )
             )
 
             if (
                 stock_data
                 and "error" not in stock_data
+                and self.has_comparison_coverage(
+                    stock_data
+                )
             ):
 
                 interpretation = (
@@ -415,29 +443,16 @@ class ComparisonAgent:
         }
 
     # ---------------------------------------------------
-    # PARTIAL DATA FALLBACK
+    # INSUFFICIENT DATA RESPONSE
     # ---------------------------------------------------
 
-    def build_partial_data_response(
+    def build_insufficient_data_response(
         self,
         query: str,
-        company_queries: list,
         resolved_companies: list,
-        comparison_data: list,
         successful_fetches: int,
-        api_failures: int,
-        analysis_focus: list | None = None
+        api_failures: int
     ):
-
-        analysis_focus = (
-            analysis_focus or []
-        )
-
-        available_by_ticker = {
-            company.get("ticker"):
-            company
-            for company in comparison_data
-        }
 
         companies_compared = [
             company.get(
@@ -450,182 +465,8 @@ class ComparisonAgent:
             for company in resolved_companies
         ]
 
-        comparative_analysis = []
-        strengths = {}
-        risks = {}
-
-        for company in resolved_companies:
-
-            company_name = (
-                company.get(
-                    "company_name"
-                )
-                or company.get(
-                    "ticker"
-                )
-                or "Company"
-            )
-
-            ticker = company.get(
-                "ticker",
-                "ticker unavailable"
-            )
-
-            available = available_by_ticker.get(
-                company.get(
-                    "ticker"
-                )
-            )
-
-            if available:
-
-                stock_data = (
-                    available.get(
-                        "stock_data",
-                        {}
-                    )
-                )
-
-                comparative_analysis.append(
-                    (
-                        f"{company_name} ({ticker}) was resolved and "
-                        "live market data was partially available. "
-                        f"Current price: {stock_data.get('current_price', 'not available')}; "
-                        f"P/E: {stock_data.get('pe_ratio', 'not available')}; "
-                        f"ROE: {stock_data.get('roe', 'not available')}."
-                    )
-                )
-
-                strengths[company_name] = [
-                    "Company entity and ticker were resolved successfully.",
-                    "Some live market data was available for this company."
-                ]
-
-                risks[company_name] = [
-                    (
-                        "Comparison reliability is limited because complete "
-                        "peer data was not available for every company."
-                    )
-                ]
-
-            else:
-
-                comparative_analysis.append(
-                    (
-                        f"{company_name} ({ticker}) was resolved, but "
-                        "live company financial data was unavailable or "
-                        "incomplete during this request."
-                    )
-                )
-
-                strengths[company_name] = [
-                    "Company entity and ticker were resolved successfully."
-                ]
-
-                risks[company_name] = [
-                    (
-                        "Live market and financial metrics were unavailable "
-                        "or incomplete during this request."
-                    )
-                ]
-
-        confidence_score = (
-            0.45
-            if successful_fetches > 0
-            else 0.3
-        )
-
-        confidence_breakdown = {
-            "retrieval_score":
-            round(
-                successful_fetches / max(
-                    len(company_queries),
-                    1
-                ),
-                2
-            ),
-            "resolved_entities":
-            len(resolved_companies),
-            "requested_entities":
-            len(company_queries),
-            "api_failures":
-            api_failures,
-            "fallback_used":
-            True
-        }
-
-        comparison_type = (
-            analysis_focus[0]
-            if analysis_focus
-            else (
-                "Peer Comparison"
-                if len(resolved_companies) >= 2
-                else "GENERAL"
-            )
-        )
-
-        parsed = {
-            "comparison_type":
-            comparison_type,
-
-            "companies_compared":
-            companies_compared,
-
-            "summary":
-            (
-                "The companies were identified, but complete live financial "
-                "data was not available for at least two companies. This is "
-                "a partial comparison focused on data availability rather "
-                "than a full investment-quality peer analysis."
-            ),
-
-            "comparative_analysis":
-            comparative_analysis,
-
-            "strengths":
-            strengths,
-
-            "risks":
-            risks,
-
-            "winner_summary":
-            (
-                "No winner can be identified from the available data. "
-                "Retry when live data is available or generate a qualitative "
-                "report for broader context."
-            ),
-
-            "balanced_view":
-            (
-                "A fair peer comparison requires current metrics for both "
-                "companies. FinIntel found the companies, but live data was "
-                "insufficient for a complete comparison in this request."
-            ),
-
-            "confidence_score":
-            confidence_score,
-
-            "confidence_breakdown":
-            confidence_breakdown,
-
-            "sources_used":
-            [],
-
-            "disclaimer":
-            (
-                "This partial comparison is for educational purposes only "
-                "and is not investment advice."
-            )
-        }
-
-        validated = (
-            ComparisonResponse(
-                **parsed
-            )
-        )
-
         logger.warning(
-            "comparison_partial_data_fallback query=%r companies=%s successful_fetches=%s api_failures=%s",
+            "comparison_insufficient_data query=%r companies=%s successful_fetches=%s api_failures=%s",
             query,
             companies_compared,
             successful_fetches,
@@ -633,14 +474,13 @@ class ComparisonAgent:
         )
 
         return {
-            "success":
-            True,
-
-            "data":
-            validated.model_dump(),
-
-            "error":
-            None
+            "success": False,
+            "data": None,
+            "error": (
+                "A reliable comparison requires sufficient live financial "
+                "metrics for at least two companies. Complete peer data was "
+                "not available for this request. Please retry later."
+            )
         }
 
     # ---------------------------------------------------
@@ -858,14 +698,11 @@ class ComparisonAgent:
 
         if len(comparison_data) < 2:
 
-            return self.build_partial_data_response(
+            return self.build_insufficient_data_response(
                 query=query,
-                company_queries=company_queries,
                 resolved_companies=resolved_companies,
-                comparison_data=comparison_data,
                 successful_fetches=successful_fetches,
-                api_failures=api_failures,
-                analysis_focus=analysis_focus
+                api_failures=api_failures
             )
 
         # ---------------------------------------------------
